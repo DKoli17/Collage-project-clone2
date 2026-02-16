@@ -11,6 +11,7 @@ import {
   Bell,
   LogOut,
   Ticket,
+  Store,
 } from 'lucide-react'
 import { useAuthStore } from '../../stores/authStore'
 import { useNavigate, useLocation } from 'react-router-dom'
@@ -39,13 +40,7 @@ export function VendorSidebar({ isOpen, onClose, isMobile }: VendorSidebarProps)
       description: 'Overview & stats',
       path: '/vendor/dashboard',
     },
-    {
-      id: 'products',
-      label: 'Products',
-      icon: Package,
-      description: 'Manage products',
-      path: '/vendor/products',
-    },
+
     {
       id: 'discounts',
       label: 'Discounts',
@@ -56,23 +51,23 @@ export function VendorSidebar({ isOpen, onClose, isMobile }: VendorSidebarProps)
     {
       id: 'coupons',
       label: 'Coupons',
-      icon: Ticket,
-      description: 'Coupon claims',
+      icon: ShoppingCart,
+      description: 'Coupon purchases & revenue',
       path: '/vendor/coupons',
     },
     {
-      id: 'verification',
-      label: 'Verification',
-      icon: FileCheck,
-      description: 'Verify students',
-      path: '/vendor/verification',
+      id: 'coupon-purchases',
+      label: 'Coupon Purchases',
+      icon: ShoppingCart,
+      description: 'Student purchases',
+      path: '/vendor/coupon-purchases',
     },
     {
-      id: 'orders',
-      label: 'Orders',
-      icon: ShoppingCart,
-      description: 'View orders',
-      path: '/vendor/orders',
+      id: 'revenue',
+      label: 'Revenue',
+      icon: Store,
+      description: 'Revenue & earnings',
+      path: '/vendor/revenue',
     },
     {
       id: 'analytics',

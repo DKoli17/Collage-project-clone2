@@ -1,12 +1,102 @@
 import express from 'express';
 import Coupon from '../models/Coupon.js';
-import { authenticateToken, authorizeRole } from '../middleware/auth.js';
+import { authenticateToken, authorizeRole, verifyStudentApproval } from '../middleware/auth.js';
 import { generateCouponCode } from '../utils/helpers.js';
 import { io } from '../server.js';
+import {
+  getAllVendors,
+  getVendorDetails,
+  generateStudentCoupon,
+  getStudentCoupons,
+  getCouponById,
+  getStudentVendorConnections,
+  getStudentVendorCouponHistory,
+} from '../controllers/couponGenerationController.js';
 
 const router = express.Router();
 
+// ========== STUDENT DISCOUNT MARKETPLACE ROUTES ==========
+
+// Get all vendors with available coupons
+router.get('/vendors', async (req, res) => {
+  try {
+    return getAllVendors(req, res);
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching vendors',
+      error: error.message,
+    });
+  }
+});
+
+// Get vendor details with their approved coupons
+router.get('/vendors/:vendorId', async (req, res) => {
+  try {
+    return getVendorDetails(req, res);
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching vendor details',
+      error: error.message,
+    });
+  }
+});
+
+// Generate coupon when student pays vendor
+router.post('/generate', authenticateToken, authorizeRole('student'), async (req, res) => {
+  try {
+    return generateStudentCoupon(req, res);
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error generating coupon',
+      error: error.message,
+    });
+  }
+});
+
+// Get all coupons for current student
+router.get('/student/my-coupons', authenticateToken, authorizeRole('student'), async (req, res) => {
+  try {
+    return getStudentCoupons(req, res);
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching student coupons',
+      error: error.message,
+    });
+  }
+});
+
+// Get student's vendor connections - all vendors student has purchased from
+router.get('/student/vendor-connections', authenticateToken, authorizeRole('student'), async (req, res) => {
+  try {
+    return getStudentVendorConnections(req, res);
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching vendor connections',
+      error: error.message,
+    });
+  }
+});
+
+// Get detailed coupon history for specific student-vendor pair
+router.get('/student/vendor/:vendorId/history', authenticateToken, authorizeRole('student'), async (req, res) => {
+  try {
+    return getStudentVendorCouponHistory(req, res);
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching coupon history',
+      error: error.message,
+    });
+  }
+});
+
 // Get vendor's coupons with redemption details
+// NOTE: This MUST come before /:couponId to avoid route matching conflicts
 router.get('/my-coupons', authenticateToken, authorizeRole('vendor'), async (req, res) => {
   try {
     const coupons = await Coupon.find({ vendor: req.user.id })
@@ -44,6 +134,7 @@ router.get('/my-coupons', authenticateToken, authorizeRole('vendor'), async (req
 });
 
 // Get vendor coupon analytics
+// NOTE: This MUST come before /:couponId to avoid route matching conflicts
 router.get('/analytics/overview', authenticateToken, authorizeRole('vendor'), async (req, res) => {
   try {
     const coupons = await Coupon.find({ vendor: req.user.id });
@@ -76,6 +167,7 @@ router.get('/analytics/overview', authenticateToken, authorizeRole('vendor'), as
 });
 
 // Get redemption details for a specific coupon
+// NOTE: This MUST come before /:couponId to avoid route matching conflicts
 router.get('/:couponId/redemptions', authenticateToken, authorizeRole('vendor'), async (req, res) => {
   try {
     const coupon = await Coupon.findById(req.params.couponId)
@@ -235,23 +327,12 @@ router.post('/redeem', authenticateToken, authorizeRole('student'), async (req, 
     // Import Student model to check approval status
     const Student = (await import('../models/Student.js')).default;
 
-    // Check if student is approved by admin
+    // Check if student exists
     const student = await Student.findById(req.user.id);
     if (!student) {
       return res.status(404).json({ 
         success: false,
         message: 'Student not found' 
-      });
-    }
-
-    // CRITICAL CHECK: Only approved students can redeem coupons
-    if (student.approvalStatus !== 'approved') {
-      return res.status(403).json({ 
-        success: false,
-        message: 'You must be approved by admin before redeeming coupons',
-        requiredStatus: 'approved',
-        currentStatus: student.approvalStatus,
-        helpMessage: 'Your account is awaiting admin approval. Please check your verification status.'
       });
     }
 
@@ -349,6 +430,20 @@ router.get('/stats', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ message: 'Failed to fetch coupon stats', error: error.message });
+  }
+});
+
+// Get coupon by ID
+// NOTE: This MUST come last, after all specific routes like /my-coupons, /stats, etc.
+router.get('/:couponId', authenticateToken, async (req, res) => {
+  try {
+    return getCouponById(req, res);
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching coupon',
+      error: error.message,
+    });
   }
 });
 

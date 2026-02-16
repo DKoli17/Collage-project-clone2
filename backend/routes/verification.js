@@ -297,6 +297,37 @@ router.put('/:userId/approve', authenticateToken, authorizeRole('admin'), async 
       return res.status(404).json({ message: 'User not found' });
     }
 
+    // Emit real-time events
+    const io = req.io;
+    if (io) {
+      // Determine if it's a vendor or student
+      if (user.role === 'vendor') {
+        // Emit to vendor
+        io.to(`vendor:${req.params.userId}`).emit('vendor:notification:verified', {
+          message: 'Your account has been verified',
+          status: 'verified',
+          timestamp: new Date()
+        });
+      } else if (user.role === 'student') {
+        // Emit to student
+        io.to(`student:${req.params.userId}`).emit('student:notification:verified', {
+          message: 'Your account has been verified',
+          status: 'verified',
+          timestamp: new Date()
+        });
+      }
+
+      // Emit to admins
+      io.to('admins').emit('admin:user-verified', {
+        userId: req.params.userId,
+        userName: user.name,
+        role: user.role,
+        timestamp: new Date()
+      });
+
+      console.log(`📡 User ${req.params.userId} (${user.role}) verified - events emitted`);
+    }
+
     res.json({ message: 'User verified successfully', user });
   } catch (error) {
     res.status(500).json({ message: 'Failed to approve verification', error: error.message });

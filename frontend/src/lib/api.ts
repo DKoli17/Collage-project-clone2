@@ -1,6 +1,8 @@
 // API Configuration
 export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
+console.log('🔗 API Base URL:', API_BASE_URL);
+
 // Create headers with auth token if available
 export const getHeaders = (token?: string) => {
   const headers: Record<string, string> = {
@@ -75,3 +77,13 @@ export const apiRequest = async (
     throw error;
   }
 };
+
+// Default API client with convenience methods
+const api = {
+  get: (endpoint: string, token?: string) => apiRequest(endpoint, 'GET', undefined, token),
+  post: (endpoint: string, data?: any, token?: string) => apiRequest(endpoint, 'POST', data, token),
+  put: (endpoint: string, data?: any, token?: string) => apiRequest(endpoint, 'PUT', data, token),
+  delete: (endpoint: string, token?: string) => apiRequest(endpoint, 'DELETE', undefined, token),
+};
+
+export default api;

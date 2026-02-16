@@ -87,8 +87,15 @@ export const signup = async (req, res) => {
       });
     }
 
-    // Step 2: Check if email already exists
-    console.log('🔍 Step 2: Checking if email exists...');
+    // Validate vendor-specific fields
+    if (role === 'vendor' && !businessName) {
+      console.log('❌ Business name required for vendor');
+      return res.status(400).json({
+        success: false,
+        message: 'Business name is required for vendor registration',
+      });
+    }
+    console.log('✅ Step 1: Validation passed');
     let existingUser = null;
     if (role === 'student') {
       existingUser = await Student.findOne({ email: email.toLowerCase() });
@@ -141,6 +148,11 @@ export const signup = async (req, res) => {
           mobileNumber: mobileNumber || '',
           city: city || '',
           state: state || '',
+          // Initialize location with default GeoJSON structure
+          location: {
+            type: 'Point',
+            coordinates: [0, 0], // Default coordinates [longitude, latitude]
+          },
         });
         console.log('   Created student object:', user._id);
       } else if (role === 'vendor') {
@@ -160,6 +172,11 @@ export const signup = async (req, res) => {
           verificationStatus: 'pending',
           approvalStatus: 'pending',
           isActive: true,
+          // Initialize location with default GeoJSON structure
+          location: {
+            type: 'Point',
+            coordinates: [0, 0], // Default coordinates [longitude, latitude]
+          },
         });
         console.log('   Created vendor object:', user._id);
       } else if (role === 'admin') {

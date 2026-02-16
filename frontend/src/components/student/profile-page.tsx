@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { StudentSidebar } from './dashboard/sidebar';
 import { DashboardHeader } from './dashboard-header';
+import { StudentLocationMap } from './student-location-map';
 import { CheckCircle, Clock, XCircle, Edit2, Save, Camera, Upload } from 'lucide-react';
 import { Button } from '../ui/button';
 import { useAuthStore } from '../../stores/authStore';
@@ -416,7 +417,10 @@ export function ProfilePage() {
                   className="hidden"
                 />
               </label>
-              </div>
+            </div>
+
+            {/* Real-Time Location Map */}
+            <StudentLocationMap studentData={studentData} />
             </div>
           )}
         </div>

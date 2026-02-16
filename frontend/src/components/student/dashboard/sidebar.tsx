@@ -3,13 +3,13 @@ import {
   ShoppingBag, 
   Tag, 
   Ticket, 
-  Heart, 
   Bell, 
   HelpCircle,
   User,
   LogOut,
   Menu,
-  X
+  X,
+  Store,
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../../stores/authStore'
@@ -35,10 +35,9 @@ export function StudentSidebar({ activeSection, onSectionChange, isOpen, onToggl
 
   const menuItems = [
     { id: 'overview', label: 'Dashboard', icon: LayoutDashboard, path: '/student/dashboard' },
-    { id: 'all-discounts', label: 'All Discounts', icon: ShoppingBag, path: '/student/discount' },
+    { id: 'vendors', label: 'Browse Vendors', icon: Store, path: '/student/vendors' },
     { id: 'categories', label: 'Categories', icon: Tag, path: '/student/categories' },
     { id: 'my-coupons', label: 'My Coupons', icon: Ticket, path: '/student/coupons' },
-    { id: 'saved', label: 'Saved Offers', icon: Heart, path: '/student/save-offers' },
     { id: 'notifications', label: 'Notifications', icon: Bell, path: '/student/notifications' },
     { id: 'profile', label: 'Profile', icon: User, path: '/student/profile' },
     { id: 'help-support', label: 'Help & Support', icon: HelpCircle, path: '/student/help-support' },

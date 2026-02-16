@@ -15,12 +15,11 @@ interface Coupon {
 
 interface MyCouponsProps {
   coupons: Coupon[];
-  isApproved?: boolean;
   onRemove?: (id: string) => void;
   onViewDetails?: (id: string) => void;
 }
 
-export function MyCoupons({ coupons, isApproved = false, onRemove, onViewDetails }: MyCouponsProps) {
+export function MyCoupons({ coupons, onRemove, onViewDetails }: MyCouponsProps) {
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
 
   const handleCopyCode = (code: string) => {
@@ -108,51 +107,42 @@ export function MyCoupons({ coupons, isApproved = false, onRemove, onViewDetails
 
             {/* Action Buttons */}
             <div className="flex flex-col md:flex-row gap-2">
-              {isApproved ? (
-                <>
-                  <Button
-                    onClick={() => handleCopyCode(coupon.code)}
-                    variant="outline"
-                    className="flex items-center justify-center gap-2 border-purple-300 text-purple-600 hover:bg-purple-50"
-                  >
-                    {copiedCode === coupon.code ? (
-                      <>
-                        <Check className="w-4 h-4 text-green-600" />
-                        <span className="text-green-600">Copied</span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-4 h-4" />
-                        Copy
-                      </>
-                    )}
-                  </Button>
+              <Button
+                onClick={() => handleCopyCode(coupon.code)}
+                variant="outline"
+                className="flex items-center justify-center gap-2 border-purple-300 text-purple-600 hover:bg-purple-50"
+              >
+                {copiedCode === coupon.code ? (
+                  <>
+                    <Check className="w-4 h-4 text-green-600" />
+                    <span className="text-green-600">Copied</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-4 h-4" />
+                    Copy
+                  </>
+                )}
+              </Button>
 
-                  <Button
-                    onClick={() => onViewDetails?.(coupon.id)}
-                    variant="outline"
-                    className="flex items-center justify-center gap-2 border-gray-300 text-gray-700 hover:bg-gray-50"
-                  >
-                    <Eye className="w-4 h-4" />
-                    Details
-                  </Button>
+              <Button
+                onClick={() => onViewDetails?.(coupon.id)}
+                variant="outline"
+                className="flex items-center justify-center gap-2 border-gray-300 text-gray-700 hover:bg-gray-50"
+              >
+                <Eye className="w-4 h-4" />
+                Details
+              </Button>
 
-                  {coupon.status !== 'expired' && (
-                    <Button
-                      onClick={() => onRemove?.(coupon.id)}
-                      variant="outline"
-                      className="flex items-center justify-center gap-2 border-red-300 text-red-600 hover:bg-red-50"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                      Remove
-                    </Button>
-                  )}
-                </>
-              ) : (
-                <div className="w-full p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-center">
-                  <p className="text-xs text-yellow-800 font-medium">⏳ Awaiting Admin Approval</p>
-                  <p className="text-xs text-yellow-700 mt-1">Complete admin verification to redeem coupons</p>
-                </div>
+              {coupon.status !== 'expired' && (
+                <Button
+                  onClick={() => onRemove?.(coupon.id)}
+                  variant="outline"
+                  className="flex items-center justify-center gap-2 border-red-300 text-red-600 hover:bg-red-50"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Remove
+                </Button>
               )}
             </div>
           </div>

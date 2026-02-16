@@ -3,10 +3,22 @@ import Vendor from '../models/Vendor.js';
 import Offer from '../models/Offer.js';
 import VerificationDocument from '../models/VerificationDocument.js';
 import Student from '../models/Student.js';
+import CouponPurchase from '../models/CouponPurchase.js';
 import { authenticateToken, authorizeRole } from '../middleware/auth.js';
 import { io } from '../server.js';
 
 const router = express.Router();
+
+// Helper function to safely emit socket events without crashing the endpoint
+function safeEmit(room, event, data) {
+  try {
+    if (io && io.to) {
+      io.to(room).emit(event, data);
+    }
+  } catch (error) {
+    console.warn(`Warning: Failed to emit socket event ${event} to ${room}:`, error.message);
+  }
+}
 
 // ========== VENDOR DASHBOARD ==========
 
@@ -68,16 +80,23 @@ router.get('/dashboard/overview', authenticateToken, authorizeRole('vendor'), as
       } },
     ]);
 
+    // Fetch vendor revenue data
+    const vendor = await Vendor.findById(vendorId).select('totalRevenue accountBalance totalCouponsAccepted totalCouponsRedeemed');
+    
     const overview = {
       totalOffers,
       activeOffers,
       totalRedemptions: redemptionData[0]?.totalRedemptions || 0,
       totalDiscount: redemptionData[0]?.totalDiscount || 0,
+      totalRevenue: vendor?.totalRevenue || 0,
+      accountBalance: vendor?.accountBalance || 0,
+      totalCouponsAccepted: vendor?.totalCouponsAccepted || 0,
+      totalCouponsRedeemed: vendor?.totalCouponsRedeemed || 0,
       timestamp: new Date()
     };
 
     // Broadcast to vendor room
-    io.to(`vendor:${vendorId}`).emit('vendor:overview:updated', overview);
+    safeEmit(`vendor:${vendorId}`, 'vendor:overview:updated', overview);
 
     res.json({
       success: true,
@@ -127,7 +146,7 @@ router.get('/analytics', authenticateToken, authorizeRole('vendor'), async (req,
     };
 
     // Broadcast to vendor room
-    io.to(`vendor:${vendorId}`).emit('vendor:analytics:updated', analytics);
+    safeEmit(`vendor:${vendorId}`, 'vendor:analytics:updated', analytics);
 
     res.json({
       success: true,
@@ -138,6 +157,101 @@ router.get('/analytics', authenticateToken, authorizeRole('vendor'), async (req,
     res.status(500).json({
       success: false,
       message: 'Failed to fetch analytics',
+      error: error.message,
+    });
+  }
+});
+
+// Get vendor revenue and earnings information
+router.get('/revenue', authenticateToken, authorizeRole('vendor'), async (req, res) => {
+  try {
+    const vendorId = req.user.id;
+    const { period = '30' } = req.query;
+
+    // Fetch vendor with revenue data
+    const vendor = await Vendor.findById(vendorId).select(
+      'totalRevenue accountBalance totalCouponsAccepted totalCouponsRedeemed totalCouponsPending revenueHistory'
+    );
+
+    if (!vendor) {
+      return res.status(404).json({
+        success: false,
+        message: 'Vendor not found',
+      });
+    }
+
+    // Calculate revenue for period
+    const daysBack = parseInt(period);
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - daysBack);
+
+    // Get purchases for this period
+    const periodPurchases = await CouponPurchase.aggregate([
+      {
+        $match: {
+          vendorId: new mongoose.Types.ObjectId(vendorId),
+          paidAt: { $gte: startDate },
+          paymentStatus: 'completed',
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalPeriodRevenue: { $sum: '$platformSellingPrice' },
+          totalPeriodCoupons: { $sum: 1 },
+        },
+      },
+    ]);
+
+    // Get payment breakdown by method
+    const paymentMethodBreakdown = await CouponPurchase.aggregate([
+      {
+        $match: {
+          vendorId: new mongoose.Types.ObjectId(vendorId),
+          paidAt: { $gte: startDate },
+          paymentStatus: 'completed',
+        },
+      },
+      {
+        $group: {
+          _id: '$paymentMethod',
+          count: { $sum: 1 },
+          revenue: { $sum: '$platformSellingPrice' },
+        },
+      },
+    ]);
+
+    const revenueData = {
+      totalRevenue: vendor.totalRevenue || 0,
+      accountBalance: vendor.accountBalance || 0,
+      periodRevenue: periodPurchases[0]?.totalPeriodRevenue || 0,
+      periodCoupons: periodPurchases[0]?.totalPeriodCoupons || 0,
+      period: `Last ${daysBack} days`,
+      statistics: {
+        couponsAccepted: vendor.totalCouponsAccepted || 0,
+        couponsRedeemed: vendor.totalCouponsRedeemed || 0,
+        couponsPending: vendor.totalCouponsPending || 0,
+      },
+      paymentMethods: paymentMethodBreakdown.map(method => ({
+        method: method._id || 'unknown',
+        count: method.count,
+        revenue: method.revenue,
+      })),
+      timestamp: new Date(),
+    };
+
+    // Broadcast to vendor room
+    safeEmit(`vendor:${vendorId}`, 'vendor:revenue:updated', revenueData);
+
+    res.json({
+      success: true,
+      data: revenueData,
+    });
+  } catch (error) {
+    console.error('Error fetching revenue:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch revenue data',
       error: error.message,
     });
   }
@@ -167,7 +281,7 @@ router.get('/orders', authenticateToken, authorizeRole('vendor'), async (req, re
       .lean();
 
     // Broadcast to vendor room
-    io.to(`vendor:${vendorId}`).emit('vendor:orders:updated', {
+    safeEmit(`vendor:${vendorId}`, 'vendor:orders:updated', {
       orders,
       pagination: { page: parseInt(page), limit: parseInt(limit), total },
       timestamp: new Date()
@@ -227,7 +341,7 @@ router.get('/products', authenticateToken, authorizeRole('vendor'), async (req, 
       .lean();
 
     // Broadcast to vendor room
-    io.to(`vendor:${vendorId}`).emit('vendor:products:updated', {
+    safeEmit(`vendor:${vendorId}`, 'vendor:products:updated', {
       products,
       pagination: { page: parseInt(page), limit: parseInt(limit), total },
       timestamp: new Date()
@@ -259,6 +373,83 @@ router.get('/products', authenticateToken, authorizeRole('vendor'), async (req, 
   }
 });
 
+// Get vendor coupon purchases (student transactions)
+router.get('/coupon-purchases', authenticateToken, authorizeRole('vendor'), async (req, res) => {
+  try {
+    const vendorId = req.user.id;
+    const { page = 1, limit = 10, status = 'all', search = '' } = req.query;
+    const skip = (page - 1) * limit;
+
+    // Build filter
+    let filter = { vendorId: vendorId };
+    if (status !== 'all') {
+      filter.status = status;
+    }
+
+    // Add search filter for coupon code, student name, or email
+    if (search) {
+      const studentIds = await Student.find({
+        $or: [
+          { name: { $regex: search, $options: 'i' } },
+          { email: { $regex: search, $options: 'i' } },
+        ],
+      }).select('_id');
+
+      filter.$or = [
+        { couponCode: { $regex: search, $options: 'i' } },
+        { studentId: { $in: studentIds.map(s => s._id) } },
+      ];
+    }
+
+    // Fetch purchases with student and offer details
+    const purchases = await CouponPurchase.find(filter)
+      .populate('studentId', 'name email')
+      .populate('offerId', 'title')
+      .select('couponCode studentId offerId discountType discountValue originalValue platformSellingPrice purchasedAt expiryDate status vendorApprovalStatus')
+      .sort({ purchasedAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    // Get total count
+    const total = await CouponPurchase.countDocuments(filter);
+    const totalPages = Math.ceil(total / limit);
+
+    // Calculate stats - build aggregation pipeline correctly
+    let statsFilter = { vendorId: vendorId };
+    if (status !== 'all') {
+      statsFilter.status = status;
+    }
+    
+    const stats = await CouponPurchase.aggregate([
+      { $match: statsFilter },
+      {
+        $group: {
+          _id: null,
+          totalRevenue: { $sum: '$platformSellingPrice' },
+          totalPurchases: { $sum: 1 },
+        },
+      },
+    ]);
+
+    res.json({
+      success: true,
+      purchases: purchases,
+      total: total,
+      totalPages: totalPages,
+      page: parseInt(page),
+      limit: parseInt(limit),
+      stats: stats[0] || { totalRevenue: 0, totalPurchases: 0 },
+    });
+  } catch (error) {
+    console.error('Error fetching coupon purchases:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch coupon purchases',
+      error: error.message,
+    });
+  }
+});
+
 // Get vendor discounts
 router.get('/discounts', authenticateToken, authorizeRole('vendor'), async (req, res) => {
   try {
@@ -270,7 +461,7 @@ router.get('/discounts', authenticateToken, authorizeRole('vendor'), async (req,
       .lean();
 
     // Broadcast to vendor room
-    io.to(`vendor:${vendorId}`).emit('vendor:discounts:updated', {
+    safeEmit(`vendor:${vendorId}`, 'vendor:discounts:updated', {
       discounts: discounts.map(d => ({
         id: d._id,
         name: d.title,
@@ -332,7 +523,7 @@ router.get('/notifications', authenticateToken, authorizeRole('vendor'), async (
     }));
 
     // Broadcast to vendor room
-    io.to(`vendor:${vendorId}`).emit('vendor:notifications:updated', {
+    safeEmit(`vendor:${vendorId}`, 'vendor:notifications:updated', {
       notifications,
       timestamp: new Date()
     });
@@ -358,27 +549,43 @@ router.get('/notifications', authenticateToken, authorizeRole('vendor'), async (
 // Update vendor profile
 router.put('/profile/update', authenticateToken, authorizeRole('vendor'), async (req, res) => {
   try {
-    const { businessName, businessType, mobileNumber, businessEmail, businessAddress, city, state, businessDescription, website } = req.body;
+    const { businessName, businessType, mobileNumber, businessEmail, businessAddress, city, state, businessDescription, website, latitude, longitude, locality, postalCode, mapUrl } = req.body;
+    
+    // Prepare update object
+    const updateData = {
+      businessName,
+      businessType,
+      mobileNumber,
+      businessEmail,
+      businessAddress,
+      city,
+      state,
+      businessDescription,
+      website,
+      latitude,
+      longitude,
+      locality,
+      postalCode,
+      mapUrl,
+      updatedAt: new Date(),
+    };
+
+    // If latitude and longitude are provided, create a GeoJSON Point for geospatial queries
+    if (latitude && longitude) {
+      updateData.location = {
+        type: 'Point',
+        coordinates: [parseFloat(longitude), parseFloat(latitude)] // [longitude, latitude]
+      };
+    }
     
     const updatedVendor = await Vendor.findByIdAndUpdate(
       req.user.id,
-      {
-        businessName,
-        businessType,
-        mobileNumber,
-        businessEmail,
-        businessAddress,
-        city,
-        state,
-        businessDescription,
-        website,
-        updatedAt: new Date(),
-      },
+      updateData,
       { new: true }
     ).select('-password');
 
     // Broadcast profile update
-    io.to(`vendor:${req.user.id}`).emit('vendor:profile:updated', {
+    safeEmit(`vendor:${req.user.id}`, 'vendor:profile:updated', {
       vendor: updatedVendor,
       timestamp: new Date()
     });
@@ -394,6 +601,82 @@ router.put('/profile/update', authenticateToken, authorizeRole('vendor'), async 
       success: false,
       message: 'Failed to update profile',
       error: error.message,
+    });
+  }
+});
+
+// POST endpoint for updating vendor location in real-time
+router.post('/update-location', authenticateToken, authorizeRole('vendor'), async (req, res) => {
+  try {
+    const { latitude, longitude, accuracy } = req.body;
+
+    if (!latitude || !longitude) {
+      return res.status(400).json({
+        success: false,
+        message: 'Latitude and longitude are required'
+      });
+    }
+
+    const lat = parseFloat(latitude);
+    const lng = parseFloat(longitude);
+
+    if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid coordinates'
+      });
+    }
+
+    const updateData = {
+      latitude: lat,
+      longitude: lng,
+      location: {
+        type: 'Point',
+        coordinates: [lng, lat]
+      },
+      updatedAt: new Date()
+    };
+
+    const vendor = await Vendor.findByIdAndUpdate(
+      req.user.id,
+      updateData,
+      { new: true }
+    ).select('-password');
+
+    // Emit real-time location update via socket
+    try {
+      if (io) {
+        // Emit to student rooms for location tracking
+        io.emit('vendor:location:updated', {
+          vendorId: req.user.id,
+          latitude: lat,
+          longitude: lng,
+          accuracy,
+          timestamp: new Date()
+        });
+
+        // Emit to vendor's own room
+        io.to(`vendor:${req.user.id}`).emit('location:updated', {
+          latitude: lat,
+          longitude: lng,
+          timestamp: new Date()
+        });
+      }
+    } catch (err) {
+      console.error('Failed to emit socket event:', err.message);
+    }
+
+    res.json({
+      success: true,
+      message: 'Store location updated successfully',
+      data: vendor
+    });
+  } catch (error) {
+    console.error('Error updating vendor location:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update location',
+      error: error.message
     });
   }
 });
@@ -434,7 +717,7 @@ router.get('/pending-verifications', authenticateToken, authorizeRole('vendor'),
       }));
 
     // Broadcast to vendor room if needed
-    io.to(`vendor:${req.user.id}`).emit('vendor:verifications:updated', {
+    safeEmit(`vendor:${req.user.id}`, 'vendor:verifications:updated', {
       verifications: pendingVerifications,
       timestamp: new Date()
     });
@@ -456,6 +739,141 @@ router.get('/pending-verifications', authenticateToken, authorizeRole('vendor'),
     });
   }
 });
+
+// Find nearby students for vendor (based on vendor's location)
+router.get('/location/nearby-students', authenticateToken, authorizeRole('vendor'), async (req, res) => {
+  try {
+    const vendor = await Vendor.findById(req.user.id);
+
+    if (!vendor || !vendor.latitude || !vendor.longitude) {
+      return res.status(400).json({
+        success: false,
+        message: 'Vendor location not set. Please update your location first.'
+      });
+    }
+
+    const { radius = 10, page = 1, limit = 10 } = req.query;
+    const lat = vendor.latitude;
+    const lon = vendor.longitude;
+    const radiusKm = parseFloat(radius);
+    const radiusInMeters = radiusKm * 1000;
+
+    const skip = (page - 1) * limit;
+
+    try {
+      // Try geospatial query
+      // Use $geoWithin instead of $near to avoid sorting requirement
+      const students = await Student.find({
+        location: {
+          $geoWithin: {
+            $centerSphere: [[lon, lat], radiusInMeters / 6371000] // radius in radians
+          }
+        },
+        isActive: true,
+        approvalStatus: 'approved'
+      })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .select('name email mobileNumber latitude longitude locality city state collegeName enrollmentNumber');
+
+      const total = await Student.countDocuments({
+        location: {
+          $geoWithin: {
+            $centerSphere: [[lon, lat], radiusInMeters / 6371000] // radius in radians
+          }
+        },
+        isActive: true,
+        approvalStatus: 'approved'
+      });
+
+      return res.json({
+        success: true,
+        vendorLocation: {
+          latitude: vendor.latitude,
+          longitude: vendor.longitude,
+          businessAddress: vendor.businessAddress,
+          city: vendor.city,
+          state: vendor.state
+        },
+        students: students.map(s => ({
+          ...s.toObject(),
+          distance: calculateDistance(lat, lon, s.latitude, s.longitude)
+        })),
+        pagination: { page: parseInt(page), limit: parseInt(limit), total }
+      });
+    } catch (geoError) {
+      console.warn('Geospatial query failed, using fallback:', geoError.message);
+
+      // Fallback: manual distance calculation
+      const students = await Student.find({
+        isActive: true,
+        approvalStatus: 'approved',
+        latitude: { $exists: true, $ne: null },
+        longitude: { $exists: true, $ne: null }
+      })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .select('name email mobileNumber latitude longitude locality city state collegeName enrollmentNumber');
+
+      const studentsWithDistance = students
+        .map(s => ({
+          ...s.toObject(),
+          distance: calculateDistance(lat, lon, s.latitude, s.longitude)
+        }))
+        .filter(s => parseFloat(s.distance) <= radiusKm)
+        .sort((a, b) => parseFloat(a.distance) - parseFloat(b.distance));
+
+      const allStudentsWithDistance = await Student.find({
+        isActive: true,
+        approvalStatus: 'approved',
+        latitude: { $exists: true, $ne: null },
+        longitude: { $exists: true, $ne: null }
+      });
+
+      const totalFiltered = allStudentsWithDistance
+        .map(s => ({
+          distance: calculateDistance(lat, lon, s.latitude, s.longitude)
+        }))
+        .filter(s => parseFloat(s.distance) <= radiusKm).length;
+
+      return res.json({
+        success: true,
+        vendorLocation: {
+          latitude: vendor.latitude,
+          longitude: vendor.longitude,
+          businessAddress: vendor.businessAddress,
+          city: vendor.city,
+          state: vendor.state
+        },
+        students: studentsWithDistance,
+        pagination: { page: parseInt(page), limit: parseInt(limit), total: totalFiltered },
+        method: 'fallback'
+      });
+    }
+  } catch (error) {
+    console.error('Error in nearby-students:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to find nearby students',
+      error: error.message
+    });
+  }
+});
+
+// Helper function to calculate distance
+function calculateDistance(lat1, lon1, lat2, lon2) {
+  if (!lat2 || !lon2) return null;
+  
+  const R = 6371; // Earth's radius in kilometers
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = 
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return (R * c).toFixed(2); // Distance in km
+}
 
 // Health check for vendor endpoints
 router.get('/health', (req, res) => {

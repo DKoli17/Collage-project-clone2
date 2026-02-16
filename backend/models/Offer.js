@@ -30,6 +30,10 @@ const offerSchema = new mongoose.Schema({
     enum: ['percentage', 'fixed'],
     default: 'percentage',
   },
+  platformSellingPrice: {
+    type: Number,
+    description: 'Amount students pay to platform for this coupon (e.g., if discount is ₹100, platform sells for ₹30)',
+  },
   code: {
     type: String,
     unique: true,
@@ -37,7 +41,7 @@ const offerSchema = new mongoose.Schema({
   },
   vendor: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
+    ref: 'Vendor',
     required: true,
   },
   startDate: Date,

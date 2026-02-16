@@ -1,11 +1,9 @@
 import { NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboardIcon, TagIcon, ShieldCheckIcon, UserIcon, HeartIcon, LogOutIcon, XIcon, SparklesIcon } from 'lucide-react';
+import { LayoutDashboardIcon, TagIcon, ShieldCheckIcon, UserIcon, LogOutIcon, XIcon, SparklesIcon } from 'lucide-react';
 import { Button } from './ui/button';
 import { Separator } from './ui/separator';
 import { Badge } from './ui/badge';
 import { useAuthStore } from '../stores/authStore';
-import { useAppStore } from '../stores/appStore';
-import { useSavedStore } from '../stores/savedStore';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -15,7 +13,6 @@ interface SidebarProps {
 
 export function Sidebar({ isOpen, onClose, isMobile }: SidebarProps) {
   const { logout, user } = useAuthStore();
-  const { verificationStatus } = useAppStore();
   const { savedItems } = useSavedStore();
   const navigate = useNavigate();
 
@@ -25,11 +22,10 @@ export function Sidebar({ isOpen, onClose, isMobile }: SidebarProps) {
   };
 
   const navItems = [
-    { to: '/dashboard', icon: LayoutDashboardIcon, label: 'Home', emoji: '🏠', badge: null },
-    { to: '/discounts', icon: TagIcon, label: 'All Offers', emoji: '🎁', badge: '50+' },
-    { to: '/saved', icon: HeartIcon, label: 'Saved', emoji: '❤️', badge: savedItems.length > 0 ? savedItems.length.toString() : null },
-    { to: '/verification', icon: ShieldCheckIcon, label: 'Verification', emoji: '✅', badge: verificationStatus === 'pending' ? '!' : null },
-    { to: '/account', icon: UserIcon, label: 'Profile', emoji: '👤', badge: null },
+    { to: '/student/dashboard', icon: LayoutDashboardIcon, label: 'Home', emoji: '🏠', badge: null },
+    { to: '/student/marketplace', icon: TagIcon, label: 'Browse Vendors', emoji: '🛍️', badge: null },
+    { to: '/student/my-coupons', icon: TagIcon, label: 'My Coupons', emoji: '🎟️', badge: null },
+    { to: '/student/profile', icon: UserIcon, label: 'Profile', emoji: '👤', badge: null },
   ];
 
   if (!isOpen && !isMobile) return null;
@@ -90,15 +86,6 @@ export function Sidebar({ isOpen, onClose, isMobile }: SidebarProps) {
                 <p className="text-xs text-blue-100 truncate">{user?.university || 'University'}</p>
               </div>
             </div>
-            {verificationStatus === 'verified' ? (
-              <Badge className="w-full justify-center bg-white/20 text-white border-white/30 backdrop-blur-sm text-xs">
-                ✅ Verified Student
-              </Badge>
-            ) : (
-              <Badge className="w-full justify-center bg-yellow-400/20 text-yellow-100 border-yellow-300/30 backdrop-blur-sm text-xs">
-                ⏳ Pending Verification
-              </Badge>
-            )}
           </div>
         </div>
 

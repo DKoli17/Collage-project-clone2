@@ -409,7 +409,7 @@ export function VendorDiscounts() {
       {/* Add/Edit Discount Modal */}
       {(showAddModal || editingId !== null) && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl max-w-md w-full p-6 space-y-4 max-h-96 overflow-y-auto">
+          <div className="bg-white rounded-xl max-w-md w-full p-6 space-y-3 max-h-[85vh] overflow-y-auto">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-bold text-gray-900">
                 {editingId !== null ? 'Edit Discount' : 'Create Discount'}
@@ -448,33 +448,32 @@ export function VendorDiscounts() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Type
-                  </label>
-                  <select
-                    value={formData.type}
-                    onChange={(e) => setFormData({ ...formData, type: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                  >
-                    <option value="percentage">Percentage (%)</option>
-                    <option value="fixed">Fixed (₹)</option>
-                  </select>
-                </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Discount Type
+                </label>
+                <select
+                  value={formData.type}
+                  onChange={(e) => setFormData({ ...formData, type: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                >
+                  <option value="percentage">Percentage (%)</option>
+                  <option value="fixed">Fixed Amount (₹)</option>
+                </select>
+              </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Value *
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.value}
-                    onChange={(e) => setFormData({ ...formData, value: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                    placeholder={formData.type === 'percentage' ? '15' : '₹2000'}
-                  />
-                </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Discount Value * {formData.type === 'percentage' ? '(%)' : '(₹)'}
+                </label>
+                <input
+                  type="number"
+                  value={formData.value}
+                  onChange={(e) => setFormData({ ...formData, value: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                  placeholder={formData.type === 'percentage' ? 'e.g., 15' : 'e.g., 500'}
+                  min="0"
+                />
               </div>
 
               <div>

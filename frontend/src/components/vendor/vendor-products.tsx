@@ -592,14 +592,15 @@ export function VendorProducts() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Discount Value *
+                    Discount Value * {formData.discountType === 'percentage' ? '(%)' : '(₹)'}
                   </label>
                   <input
                     type="number"
                     value={formData.discount}
                     onChange={(e) => setFormData({ ...formData, discount: e.target.value })}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                    placeholder={formData.discountType === 'percentage' ? '15' : '1000'}
+                    placeholder={formData.discountType === 'percentage' ? 'e.g., 15' : 'e.g., 500'}
+                    min="0"
                   />
                 </div>
 

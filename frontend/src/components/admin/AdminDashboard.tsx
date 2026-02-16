@@ -148,7 +148,6 @@ export function AdminDashboard() {
   ];
 
   const pendingActions = [
-    { id: 1, title: `${pendingCount} Pending Offers`, description: 'Offers waiting for admin approval', action: 'Review Now', route: '/admin/offers', urgent: pendingCount > 0 },
     { id: 2, title: '23 Verification Requests', description: 'Student IDs waiting for approval', action: 'Review Now', route: '/admin/verifications', urgent: true },
   ];
 
@@ -305,8 +304,8 @@ export function AdminDashboard() {
                     </p>
                   </div>
                   <button
-                    onClick={() => navigate('/admin/offers')}
-                    className="px-3 py-1.5 rounded text-xs font-medium bg-yellow-600 text-white hover:bg-yellow-700 transition-all flex-shrink-0"
+                    onClick={() => navigate('/admin/verifications')}
+                    className="px-3 py-1.5 rounded text-xs font-medium bg-blue-600 text-white hover:bg-blue-700 transition-all flex-shrink-0"
                   >
                     Review
                   </button>

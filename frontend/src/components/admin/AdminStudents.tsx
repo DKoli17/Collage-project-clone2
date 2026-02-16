@@ -13,10 +13,12 @@ import {
   AlertCircle,
   Mail,
   Clock,
-  Award
+  Award,
+  MapPin
 } from 'lucide-react';
 import { useToast } from '../../hooks/use-toast';
 import { useRealtimeUpdates } from '../../hooks/useRealtimeUpdates';
+import { StudentLocationMap } from './StudentLocationMap';
 
 interface Student {
   _id: string;
@@ -53,6 +55,8 @@ export function AdminStudents() {
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
+  const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
+  const [loadingLocations, setLoadingLocations] = useState(false);
   const { toast } = useToast();
 
   // Set up real-time updates
@@ -105,6 +109,48 @@ export function AdminStudents() {
       if (autoRefreshInterval) clearInterval(autoRefreshInterval);
     };
   }, [autoRefreshEnabled, wsConnected]);
+
+  // Fetch student locations for map view
+  const fetchStudentLocations = async () => {
+    try {
+      setLoadingLocations(true);
+      const token = localStorage.getItem('auth_token');
+      
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
+
+      const response = await fetch('http://localhost:5000/api/student/all-locations', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch student locations');
+      }
+      
+      const data = await response.json();
+      return data.students || [];
+    } catch (error: any) {
+      console.error('Fetch locations error:', error);
+      toast({
+        title: '❌ Error loading locations',
+        description: error.message,
+        variant: 'destructive',
+      });
+      return [];
+    } finally {
+      setLoadingLocations(false);
+    }
+  };
+
+  useEffect(() => {
+    if (viewMode === 'map') {
+      fetchStudentLocations();
+    }
+  }, [viewMode]);
 
   const fetchStudents = async () => {
     try {
@@ -325,6 +371,21 @@ export function AdminStudents() {
           </div>
           <div className="flex gap-2 flex-wrap">
             <Button
+              onClick={() => setViewMode('list')}
+              variant={viewMode === 'list' ? "default" : "outline"}
+              className="gap-2 text-sm"
+            >
+              📋 List View
+            </Button>
+            <Button
+              onClick={() => setViewMode('map')}
+              variant={viewMode === 'map' ? "default" : "outline"}
+              className="gap-2 text-sm"
+            >
+              <MapPin className="w-4 h-4" />
+              Map View
+            </Button>
+            <Button
               onClick={() => setAutoRefreshEnabled(!autoRefreshEnabled)}
               variant={autoRefreshEnabled ? "default" : "outline"}
               className="gap-2"
@@ -346,6 +407,54 @@ export function AdminStudents() {
         </div>
       </div>
 
+      {/* Stats Cards - Enhanced */}
+      {viewMode === 'map' ? (
+        // MAP VIEW
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+          <div className="px-6 py-5 border-b border-gray-200 flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                <MapPin className="w-5 h-5" />
+                Student Locations
+              </h2>
+              <p className="text-xs text-gray-600 mt-1">
+                Real-time tracking of student locations
+              </p>
+            </div>
+            <Button
+              onClick={fetchStudentLocations}
+              disabled={loadingLocations}
+              variant="outline"
+              className="gap-2 text-sm"
+            >
+              <RefreshCw className="w-4 h-4" />
+              Refresh Locations
+            </Button>
+          </div>
+          <div style={{ height: '600px' }} className="relative">
+            <StudentLocationMap
+              students={students.filter(s => (s as any).latitude && (s as any).longitude).map(s => ({
+                _id: s._id,
+                name: `${s.firstName || ''} ${s.lastName || ''}`.trim() || s.username || 'Unknown',
+                email: s.email,
+                latitude: (s as any).latitude,
+                longitude: (s as any).longitude,
+                locality: (s as any).locality || '',
+                city: (s as any).city || '',
+                state: (s as any).state || '',
+              }))}
+              isLoading={loadingLocations}
+              onStudentClick={(student) => {
+                const fullStudent = students.find(s => s._id === student._id);
+                if (fullStudent) {
+                  handleViewDetails(fullStudent);
+                }
+              }}
+            />
+          </div>
+        </div>
+      ) : (
+        <>
       {/* Stats Cards - Enhanced */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-5 hover:shadow-md hover:border-blue-300 transition-all">
@@ -620,6 +729,8 @@ export function AdminStudents() {
           )}
         </div>
       </div>
+        </>
+      )}
 
       {/* Student Details Modal */}
       {showDetailModal && selectedStudent && (

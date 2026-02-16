@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
+import { LocationPermissionPrompt } from './LocationPermissionPrompt';
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -26,6 +27,10 @@ export function AppShell({ children }: AppShellProps) {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
+  // Check if user is a student
+  const userRole = localStorage.getItem('user_role');
+  const isStudent = userRole === 'student';
+
   // Verification polling removed - admin-only verification workflow
 
   const toggleSidebar = () => {
@@ -43,6 +48,8 @@ export function AppShell({ children }: AppShellProps) {
           </div>
         </main>
       </div>
+      {/* Location permission prompt for students */}
+      {isStudent && <LocationPermissionPrompt />}
     </div>
   );
 }

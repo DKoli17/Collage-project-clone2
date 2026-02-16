@@ -74,6 +74,23 @@ const studentSchema = new mongoose.Schema({
   city: String,
   state: String,
   
+  // Location information
+  location: {
+    type: {
+      type: String,
+      enum: ['Point'],
+      default: 'Point',
+    },
+    coordinates: {
+      type: [Number], // [longitude, latitude]
+      index: '2dsphere',
+    },
+  },
+  latitude: Number,
+  longitude: Number,
+  locality: String,
+  postalCode: String,
+  
   // Profile
   profilePicture: String,
   bio: String,
@@ -87,5 +104,8 @@ const studentSchema = new mongoose.Schema({
     default: Date.now,
   },
 });
+
+// Create 2dsphere index for geospatial queries
+studentSchema.index({ 'location': '2dsphere' });
 
 export default mongoose.model('Student', studentSchema);

@@ -24,10 +24,12 @@ export function VendorTopBar({ onMenuClick }: VendorTopBarProps) {
     const pathname = location.pathname
     
     if (pathname.includes('/dashboard')) return 'Dashboard'
-    if (pathname.includes('/products')) return 'Products & Services'
     if (pathname.includes('/discounts')) return 'Student Discounts'
+    if (pathname.includes('/coupon-purchases')) return 'Coupon Purchases'
+    if (pathname.includes('/coupons')) return 'Coupon Claims'
     if (pathname.includes('/verification')) return 'Student Document Verification'
     if (pathname.includes('/orders')) return 'Orders'
+    if (pathname.includes('/revenue')) return 'Revenue & Earnings'
     if (pathname.includes('/analytics')) return 'Analytics & Reports'
     if (pathname.includes('/notifications')) return 'Notifications'
     if (pathname.includes('/profile')) return 'Profile Settings'

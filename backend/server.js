@@ -31,6 +31,7 @@ import authRoutes from './routes/auth.js';
 import loginRoutes from './routes/login.js';
 import offersRoutes from './routes/offers.js';
 import couponsRoutes from './routes/coupons.js';
+import couponPurchaseRoutes from './routes/coupon-purchase.js';
 import studentRoutes from './routes/student.js';
 import adminRoutes from './routes/admin.js';
 import vendorRoutes from './routes/vendor.js';
@@ -119,6 +120,95 @@ io.on('connection', (socket) => {
     console.log(`✅ Vendor ${vendorId} joined real-time updates`);
     socket.emit('connection:status', { connected: true, message: 'Connected to real-time updates', userType: 'vendor' });
     socket.broadcast.to('vendors').emit('vendor:joined', { vendorId, timestamp: new Date() });
+  });
+
+  // ========== STUDENT CONNECTIONS ==========
+  socket.on('student:join', (studentId) => {
+    socket.join(`student:${studentId}`);
+    socket.join('students');
+    console.log(`✅ Student ${studentId} joined real-time updates`);
+    socket.emit('connection:status', { connected: true, message: 'Connected to real-time updates', userType: 'student' });
+  });
+
+  // ========== STUDENT LOCATION TRACKING ==========
+  socket.on('student:send-location', async (locationData) => {
+    try {
+      const { studentId, latitude, longitude, locality } = locationData;
+      
+      if (!studentId || latitude === undefined || longitude === undefined) {
+        socket.emit('error:location', { message: 'Invalid location data' });
+        return;
+      }
+
+      const { default: Student } = await import('./models/Student.js');
+      
+      // Update student location in database
+      const student = await Student.findByIdAndUpdate(
+        studentId,
+        {
+          latitude,
+          longitude,
+          locality: locality || '',
+          location: {
+            type: 'Point',
+            coordinates: [longitude, latitude],
+          },
+          updatedAt: new Date(),
+        },
+        { new: true }
+      ).select('-password');
+
+      if (student) {
+        // Broadcast to admins
+        io.to('admins').emit('student:location-updated', {
+          studentId: student._id,
+          student: {
+            _id: student._id,
+            name: student.name,
+            email: student.email,
+            latitude: student.latitude,
+            longitude: student.longitude,
+            locality: student.locality,
+            city: student.city,
+            state: student.state,
+          },
+          timestamp: new Date(),
+        });
+
+        // Acknowledge to student
+        socket.emit('location:acknowledged', { 
+          success: true, 
+          message: 'Location received',
+          data: { latitude, longitude, locality }
+        });
+
+        console.log(`📍 Location updated for student ${studentId}: ${latitude}, ${longitude}`);
+      }
+    } catch (error) {
+      console.error('Error processing student location:', error);
+      socket.emit('error:location', { message: 'Failed to update location' });
+    }
+  });
+
+  // Request all student locations (admin)
+  socket.on('admin:request-locations', async (adminId) => {
+    try {
+      const { default: Student } = await import('./models/Student.js');
+      const students = await Student.find({
+        latitude: { $ne: null },
+        longitude: { $ne: null },
+      }).select('_id name email latitude longitude locality city state').lean();
+
+      socket.emit('students:locations', {
+        students,
+        count: students.length,
+        timestamp: new Date(),
+      });
+      console.log(`📤 Sent student locations to admin ${adminId}`);
+    } catch (error) {
+      console.error('Error fetching student locations:', error);
+      socket.emit('error:broadcast', { message: 'Failed to fetch locations' });
+    }
   });
 
   // Vendor requesting their own offers
@@ -321,6 +411,62 @@ io.on('connection', (socket) => {
     } catch (error) {
       console.error('Error fetching vendor verifications:', error);
       socket.emit('error:broadcast', { message: 'Failed to fetch verifications' });
+    }
+  });
+
+  // ========== VENDOR REVENUE ==========
+  socket.on('vendor:request-revenue', async (vendorId) => {
+    try {
+      const { default: Vendor } = await import('./models/Vendor.js');
+      const { default: CouponPurchase } = await import('./models/CouponPurchase.js');
+      
+      // Fetch vendor with revenue data
+      const vendor = await Vendor.findById(vendorId).select(
+        'totalRevenue accountBalance totalCouponsAccepted totalCouponsRedeemed totalCouponsPending revenueHistory'
+      ).lean();
+
+      if (!vendor) {
+        socket.emit('error:broadcast', { message: 'Vendor not found' });
+        return;
+      }
+
+      // Get recent transactions (last 24 hours)
+      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const recentTransactions = await CouponPurchase.aggregate([
+        {
+          $match: {
+            vendorId: mongoose.Types.ObjectId(vendorId),
+            paidAt: { $gte: oneDayAgo },
+            paymentStatus: 'completed',
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            totalRecentRevenue: { $sum: '$platformSellingPrice' },
+            totalRecentCoupons: { $sum: 1 },
+          },
+        },
+      ]);
+
+      const revenueData = {
+        totalRevenue: vendor.totalRevenue || 0,
+        accountBalance: vendor.accountBalance || 0,
+        recentRevenue24h: recentTransactions[0]?.totalRecentRevenue || 0,
+        recentCoupons24h: recentTransactions[0]?.totalRecentCoupons || 0,
+        statistics: {
+          couponsAccepted: vendor.totalCouponsAccepted || 0,
+          couponsRedeemed: vendor.totalCouponsRedeemed || 0,
+          couponsPending: vendor.totalCouponsPending || 0,
+        },
+        timestamp: new Date(),
+      };
+
+      socket.emit('vendor:revenue:loaded', revenueData);
+      console.log(`📤 Sending vendor ${vendorId} revenue data`);
+    } catch (error) {
+      console.error('Error fetching vendor revenue:', error);
+      socket.emit('error:broadcast', { message: 'Failed to fetch revenue data' });
     }
   });
 
@@ -720,6 +866,176 @@ io.on('connection', (socket) => {
     }
   });
 
+  // ========== STUDENT REQUEST HANDLERS ==========
+  socket.on('student:request-coupons', async (studentId) => {
+    try {
+      const { default: CouponPurchase } = await import('./models/CouponPurchase.js');
+      
+      const coupons = await CouponPurchase.find({ studentId })
+        .populate('offerId', 'title discountValue discountType')
+        .sort({ purchasedAt: -1 })
+        .select('couponCode offerId status discountType discountValue expiryDate platformSellingPrice purchasedAt paidAt')
+        .lean();
+
+      const formattedCoupons = coupons.map(c => ({
+        _id: c._id,
+        couponCode: c.couponCode,
+        offerTitle: c.offerId?.title || 'Unknown Offer',
+        discountValue: c.discountValue,
+        discountType: c.discountType,
+        status: c.status,
+        expiryDate: c.expiryDate,
+        platformSellingPrice: c.platformSellingPrice,
+        paidAt: c.paidAt,
+      }));
+
+      socket.emit('student:coupons:loaded', { 
+        coupons: formattedCoupons, 
+        timestamp: new Date() 
+      });
+      console.log(`📤 Sent ${coupons.length} coupons to student ${studentId}`);
+    } catch (error) {
+      console.error('Error fetching student coupons:', error);
+      socket.emit('error:broadcast', { message: 'Failed to fetch coupons' });
+    }
+  });
+
+  socket.on('student:request-offers', async (studentId) => {
+    try {
+      const { default: Offer } = await import('./models/Offer.js');
+      
+      const offers = await Offer.find({ 
+        isActive: true, 
+        approvalStatus: 'approved' 
+      })
+        .populate('vendor', 'name businessName')
+        .select('title description category discount discountType vendor isActive approvalStatus')
+        .sort({ createdAt: -1 })
+        .lean();
+
+      socket.emit('student:offers:loaded', { 
+        offers, 
+        timestamp: new Date() 
+      });
+      console.log(`📤 Sent ${offers.length} available offers to student ${studentId}`);
+    } catch (error) {
+      console.error('Error fetching student offers:', error);
+      socket.emit('error:broadcast', { message: 'Failed to fetch offers' });
+    }
+  });
+
+  socket.on('student:request-approval-status', async (studentId) => {
+    try {
+      const { default: Student } = await import('./models/Student.js');
+      
+      const student = await Student.findById(studentId)
+        .select('approvalStatus approvalRemarks verificationStatus')
+        .lean();
+
+      if (!student) {
+        socket.emit('error:broadcast', { message: 'Student not found' });
+        return;
+      }
+
+      socket.emit('student:approval-status:loaded', {
+        status: student.approvalStatus,
+        verificationStatus: student.verificationStatus,
+        remarks: student.approvalRemarks,
+        timestamp: new Date()
+      });
+      console.log(`📤 Sent approval status to student ${studentId}`);
+    } catch (error) {
+      console.error('Error fetching student approval status:', error);
+      socket.emit('error:broadcast', { message: 'Failed to fetch approval status' });
+    }
+  });
+
+  // ========== ADMIN REQUEST HANDLERS ==========
+  socket.on('admin:request-students', async (adminId) => {
+    try {
+      const { default: Student } = await import('./models/Student.js');
+      
+      const students = await Student.find()
+        .select('name email approvalStatus verificationStatus university collegeName createdAt')
+        .sort({ createdAt: -1 })
+        .lean();
+
+      io.to(`admin:${adminId}`).emit('admin:students:loaded', { 
+        students, 
+        timestamp: new Date() 
+      });
+      console.log(`📤 Sent ${students.length} students to admin ${adminId}`);
+    } catch (error) {
+      console.error('Error fetching students for admin:', error);
+      socket.emit('error:broadcast', { message: 'Failed to fetch students' });
+    }
+  });
+
+  socket.on('admin:request-vendors', async (adminId) => {
+    try {
+      const { default: Vendor } = await import('./models/Vendor.js');
+      
+      const vendors = await Vendor.find()
+        .select('name businessName approvalStatus isActive totalRevenue createdAt')
+        .sort({ createdAt: -1 })
+        .lean();
+
+      io.to(`admin:${adminId}`).emit('admin:vendors:loaded', { 
+        vendors, 
+        timestamp: new Date() 
+      });
+      console.log(`📤 Sent ${vendors.length} vendors to admin ${adminId}`);
+    } catch (error) {
+      console.error('Error fetching vendors for admin:', error);
+      socket.emit('error:broadcast', { message: 'Failed to fetch vendors' });
+    }
+  });
+
+  socket.on('admin:request-offers', async (adminId) => {
+    try {
+      const { default: Offer } = await import('./models/Offer.js');
+      
+      const offers = await Offer.find()
+        .populate('vendor', 'name businessName')
+        .select('title vendor approvalStatus isActive discount currentRedemptions createdAt')
+        .sort({ createdAt: -1 })
+        .lean();
+
+      io.to(`admin:${adminId}`).emit('admin:offers:loaded', { 
+        offers, 
+        timestamp: new Date() 
+      });
+      console.log(`📤 Sent ${offers.length} offers to admin ${adminId}`);
+    } catch (error) {
+      console.error('Error fetching offers for admin:', error);
+      socket.emit('error:broadcast', { message: 'Failed to fetch offers' });
+    }
+  });
+
+  socket.on('admin:request-transactions', async (adminId) => {
+    try {
+      const { default: CouponPurchase } = await import('./models/CouponPurchase.js');
+      
+      const transactions = await CouponPurchase.find({ paymentStatus: 'completed' })
+        .populate('studentId', 'name email')
+        .populate('vendorId', 'name businessName')
+        .populate('offerId', 'title')
+        .select('couponCode studentId vendorId offerId platformSellingPrice paymentStatus purchasedAt')
+        .sort({ purchasedAt: -1 })
+        .limit(50)
+        .lean();
+
+      io.to(`admin:${adminId}`).emit('admin:transactions:loaded', { 
+        transactions, 
+        timestamp: new Date() 
+      });
+      console.log(`📤 Sent ${transactions.length} transactions to admin ${adminId}`);
+    } catch (error) {
+      console.error('Error fetching transactions for admin:', error);
+      socket.emit('error:broadcast', { message: 'Failed to fetch transactions' });
+    }
+  });
+
   // Disconnect handling
   socket.on('disconnect', () => {
     const adminId = adminConnections.get(socket.id);
@@ -895,6 +1211,114 @@ io.on('connection', (socket) => {
     console.log(`📌 Student ${studentId} unsubscribed from notifications`);
   });
 
+  // ========== COUPON PURCHASE REAL-TIME EVENTS ==========
+  
+  // Broadcast coupon purchase to vendor and student
+  socket.on('coupon:purchase-completed', (data) => {
+    try {
+      const { studentId, vendorId, offerId, quantity, purchases } = data;
+      
+      // Notify the student
+      io.to(`student:${studentId}`).emit('coupon:purchase-success', {
+        status: 'success',
+        message: `🎉 You successfully purchased ${quantity} coupon(s)!`,
+        purchases,
+        timestamp: new Date(),
+        notificationType: 'coupon-purchase'
+      });
+      
+      // Notify the vendor
+      io.to(`vendor:${vendorId}`).emit('coupon:sold', {
+        studentId,
+        offerId,
+        quantity,
+        totalRevenue: purchases.reduce((sum, p) => sum + p.platformSellingPrice, 0),
+        message: `🛍️ ${quantity} coupon(s) was just purchased from your offer`,
+        timestamp: new Date(),
+        notificationType: 'coupon-sold'
+      });
+      
+      console.log(`✅ Coupon purchase broadcast: Student ${studentId} bought ${quantity} from Vendor ${vendorId}`);
+    } catch (error) {
+      console.error('❌ Error broadcasting coupon purchase:', error);
+      socket.emit('error:broadcast', { message: 'Failed to broadcast coupon purchase' });
+    }
+  });
+  
+  // Real-time coupon availability update
+  socket.on('coupon:availability-changed', (data) => {
+    try {
+      const { offerId, vendorId, availableQuantity, message } = data;
+      
+      // Broadcast to all students viewing offers
+      io.emit('student:coupon-availability-updated', {
+        offerId,
+        vendorId,
+        availableQuantity,
+        message: message || `Coupon availability updated`,
+        timestamp: new Date(),
+        notificationType: 'availability-change'
+      });
+      
+      console.log(`📊 Coupon availability updated for offer ${offerId}`);
+    } catch (error) {
+      console.error('❌ Error broadcasting coupon availability:', error);
+    }
+  });
+  
+  // Join student coupon room for real-time updates
+  socket.on('student:coupon-join', (studentId) => {
+    socket.join(`student-coupons:${studentId}`);
+    console.log(`✅ Student ${studentId} joined coupon purchase room`);
+    socket.emit('coupon:room-joined', {
+      message: 'Joined coupon purchase updates',
+      studentId,
+      timestamp: new Date()
+    });
+  });
+  
+  // Join vendor coupon room for real-time coupon sales
+  socket.on('vendor:coupon-sales-join', (vendorId) => {
+    socket.join(`vendor-coupon-sales:${vendorId}`);
+    console.log(`✅ Vendor ${vendorId} joined coupon sales room`);
+    socket.emit('coupon:vendor-sales-joined', {
+      message: 'Monitoring coupon sales in real-time',
+      vendorId,
+      timestamp: new Date()
+    });
+  });
+  
+  // Coupon redemption event
+  socket.on('coupon:redeemed', (data) => {
+    try {
+      const { couponCode, couponId, studentId, vendorId, discountValue, discountType } = data;
+      
+      // Notify the student
+      io.to(`student-coupons:${studentId}`).emit('coupon:redeemed-success', {
+        couponCode,
+        status: 'redeemed',
+        message: `✅ Your coupon has been redeemed successfully!`,
+        discountApplied: `${discountType === 'percentage' ? discountValue + '%' : '₹' + discountValue} off`,
+        timestamp: new Date(),
+        notificationType: 'coupon-redeemed'
+      });
+      
+      // Notify the vendor
+      io.to(`vendor-coupon-sales:${vendorId}`).emit('coupon:validated', {
+        couponCode,
+        studentId,
+        status: 'validated',
+        message: `✅ Coupon ${couponCode.substring(0, 8)}... has been validated and used`,
+        timestamp: new Date(),
+        notificationType: 'coupon-validated'
+      });
+      
+      console.log(`✅ Coupon redeemed event: ${couponCode} by vendor ${vendorId}`);
+    } catch (error) {
+      console.error('❌ Error broadcasting coupon redemption:', error);
+    }
+  });
+
   // ========================================
 });
 
@@ -950,6 +1374,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/login', loginRoutes);
 app.use('/api/offers', offersRoutes);
 app.use('/api/coupons', couponsRoutes);
+app.use('/api/coupon-purchase', couponPurchaseRoutes);
 app.use('/api/student', studentRoutes);
 app.use('/api/vendor', vendorRoutes);
 app.use('/api/admin/dashboard', adminRoutes);

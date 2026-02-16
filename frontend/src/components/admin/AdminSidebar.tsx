@@ -25,8 +25,8 @@ export function AdminSidebar({ isOpen, onClose, isMobile }: AdminSidebarProps) {
     { to: '/admin/dashboard', icon: LayoutDashboardIcon, label: 'Dashboard', emoji: '🏠', badge: null },
     { to: '/admin/students', icon: UsersIcon, label: 'Students', emoji: '🎓', badge: '1.2K' },
     { to: '/admin/vendors', icon: StoreIcon, label: 'Vendors', emoji: '🏪', badge: 'Manage' },
-    { to: '/admin/offers', icon: TagIcon, label: 'Offers', emoji: '💸', badge: '342' },
     { to: '/admin/coupons', icon: TagIcon, label: 'Coupons', emoji: '🎟️', badge: 'Pending' },
+    { to: '/admin/coupon-purchases', icon: TagIcon, label: 'Coupon Purchases', emoji: '⏳', badge: 'Verify' },
     { to: '/admin/verifications', icon: ShieldCheckIcon, label: 'Verifications', emoji: '✅', badge: '23' },
     { to: '/admin/analytics', icon: TrendingUpIcon, label: 'Analytics', emoji: '📈', badge: null },
   ];

@@ -24,7 +24,6 @@ export function NotificationsPage() {
       message: 'Tech Store is offering 30% off on laptops and accessories. Check it out now!',
       timestamp: '2 hours ago',
       read: false,
-      actionUrl: '/student/discount',
     },
     {
       id: '2',

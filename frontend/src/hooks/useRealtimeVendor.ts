@@ -46,6 +46,14 @@ interface VendorVerificationUpdate {
   timestamp: Date;
 }
 
+interface VendorRevenueUpdate {
+  totalRevenue: number;
+  accountBalance: number;
+  revenueAdded?: number;
+  couponCount?: number;
+  timestamp: Date;
+}
+
 export function useRealtimeVendor(
   onProductsUpdated?: (update: VendorProductUpdate) => void,
   onOrdersUpdated?: (update: VendorOrderUpdate) => void,
@@ -57,7 +65,8 @@ export function useRealtimeVendor(
   onNotificationReceived?: (notification: VendorNotification) => void,
   onConnectionStatusChange?: (connected: boolean) => void,
   onVerificationsUpdated?: (update: VendorVerificationUpdate) => void,
-  onCouponClaimed?: (data: any) => void
+  onCouponClaimed?: (data: any) => void,
+  onRevenueUpdated?: (update: VendorRevenueUpdate) => void
 ) {
   const socketRef = useRef<Socket | null>(null);
   const reconnectAttemptsRef = useRef(0);
@@ -93,7 +102,11 @@ export function useRealtimeVendor(
     }
 
     try {
-      const socket = io('http://localhost:5000', {
+      const socketUrl = import.meta.env.VITE_SOCKET_URL || 
+                       import.meta.env.VITE_API_URL?.replace('/api', '') || 
+                       'http://localhost:5000';
+      
+      const socket = io(socketUrl, {
         auth: {
           token,
           userId: vendorId,
@@ -103,6 +116,8 @@ export function useRealtimeVendor(
         reconnectionDelay: 1000,
         reconnectionDelayMax: 5000,
         reconnectionAttempts: maxReconnectAttemptsRef.current,
+        transports: ['websocket', 'polling'],
+        upgrade: true,
       });
 
       socket.on('connect', () => {
@@ -223,6 +238,29 @@ export function useRealtimeVendor(
         onCouponClaimed?.(data);
       });
 
+      // ========== REVENUE UPDATES ==========
+      socket.on('vendor:revenue:loaded', (update: VendorRevenueUpdate) => {
+        console.log('💰 Vendor revenue loaded:', update);
+        onRevenueUpdated?.(update);
+      });
+
+      socket.on('vendor:revenue:updated', (update: VendorRevenueUpdate) => {
+        console.log('📈 Vendor revenue updated:', update);
+        onRevenueUpdated?.(update);
+      });
+
+      socket.on('vendor:coupon-purchased', (data: any) => {
+        console.log('🛍️ Coupon purchased in real-time:', data);
+        // Trigger revenue update after coupon purchase
+        onRevenueUpdated?.({
+          totalRevenue: 0, // Will be updated by separate revenue:updated event
+          accountBalance: 0,
+          revenueAdded: data.totalPrice,
+          couponCount: data.quantity,
+          timestamp: new Date(),
+        });
+      });
+
       // Disconnection
       socket.on('disconnect', () => {
         console.log('❌ Vendor WebSocket disconnected');
@@ -231,12 +269,17 @@ export function useRealtimeVendor(
 
       // Errors
       socket.on('error', (error) => {
-        console.error('WebSocket error:', error);
+        console.warn('WebSocket error (non-blocking):', error);
       });
 
       socket.on('connect_error', (error) => {
-        console.error('Connection error:', error);
+        console.warn('Connection error (attempting reconnect):', error.message);
         reconnectAttemptsRef.current++;
+        
+        if (reconnectAttemptsRef.current >= maxReconnectAttemptsRef.current) {
+          console.warn('Max reconnection attempts reached. Real-time updates may not work.');
+          onConnectionStatusChange?.(false);
+        }
       });
 
       socketRef.current = socket;
@@ -290,6 +333,12 @@ export function useRealtimeVendor(
     }
   }, []);
 
+  const requestRevenueUpdate = useCallback((vendorId: string) => {
+    if (socketRef.current?.connected) {
+      socketRef.current.emit('vendor:request-revenue', vendorId);
+    }
+  }, []);
+
   // Broadcast vendor events
   const broadcastOfferApproved = useCallback((vendorId: string, offerId: string, offerTitle: string) => {
     if (socketRef.current?.connected) {
@@ -331,6 +380,7 @@ export function useRealtimeVendor(
     requestDiscountsUpdate,
     requestNotificationsUpdate,
     requestVerificationsUpdate,
+    requestRevenueUpdate,
     broadcastOfferApproved,
     broadcastOfferRejected,
     broadcastNewRedemption,

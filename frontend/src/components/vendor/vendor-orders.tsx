@@ -91,7 +91,12 @@ export function VendorOrders() {
 
       const data = await response.json()
       if (data.success && data.data.orders) {
-        setOrders(data.data.orders)
+        // Ensure each order has a unique ID
+        const ordersWithIds = data.data.orders.map((order: any, index: number) => ({
+          ...order,
+          id: order.id || order._id || `order-${Date.now()}-${index}`,
+        }))
+        setOrders(ordersWithIds)
       }
     } catch (error: any) {
       console.error('Error fetching orders:', error)
@@ -208,8 +213,8 @@ export function VendorOrders() {
             </thead>
             <tbody>
               {filteredOrders.length > 0 ? (
-                filteredOrders.map((order) => (
-                  <tr key={order.id} className="border-b border-gray-200 hover:bg-gray-50 transition">
+                filteredOrders.map((order, index) => (
+                  <tr key={order.id || index} className="border-b border-gray-200 hover:bg-gray-50 transition">
                     <td className="py-4 px-4 sm:px-6">
                       <div>
                         <p className="font-semibold text-gray-900 text-sm">{order.product}</p>

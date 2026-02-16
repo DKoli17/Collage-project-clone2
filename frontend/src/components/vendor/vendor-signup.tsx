@@ -76,6 +76,15 @@ export function VendorSignupPage() {
       return
     }
 
+    if (!formData.businessName) {
+      toast({
+        title: "❌ Business Name required",
+        description: "Please enter your business name",
+        variant: "destructive",
+      })
+      return
+    }
+
     if (formData.password !== formData.confirmPassword) {
       toast({
         title: "❌ Passwords don't match",

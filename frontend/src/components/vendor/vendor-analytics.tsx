@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
-import { Download, TrendingUp } from 'lucide-react'
+import { Download, TrendingUp, DollarSign, Wallet } from 'lucide-react'
 import { useRealtimeVendor } from '../../hooks/useRealtimeVendor'
 import { useToast } from '../../hooks/use-toast'
 import { getHeaders, API_BASE_URL } from '../../lib/api'
@@ -15,14 +15,33 @@ interface AnalyticsData {
   offers: any[]
 }
 
+interface RevenueData {
+  totalRevenue: number
+  accountBalance: number
+  periodRevenue: number
+  periodCoupons: number
+  period: string
+  statistics: {
+    couponsAccepted: number
+    couponsRedeemed: number
+    couponsPending: number
+  }
+  paymentMethods: Array<{
+    method: string
+    count: number
+    revenue: number
+  }>
+}
+
 export function VendorAnalytics() {
   const [dateRange, setDateRange] = useState('month')
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null)
+  const [revenueData, setRevenueData] = useState<RevenueData | null>(null)
   const [loading, setLoading] = useState(true)
   const { toast } = useToast()
 
   // Real-time vendor hook
-  const { isConnected, requestAnalyticsUpdate } = useRealtimeVendor(
+  const { isConnected, requestAnalyticsUpdate, requestRevenueUpdate } = useRealtimeVendor(
     undefined,
     undefined,
     // onAnalyticsUpdated
@@ -30,12 +49,32 @@ export function VendorAnalytics() {
       console.log('Analytics updated via real-time:', update.analytics)
       setAnalytics(update.analytics)
       setLoading(false)
+    },
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    // onRevenueUpdated
+    (update) => {
+      console.log('Revenue updated via real-time:', update)
+      setRevenueData(prev => prev ? {
+        ...prev,
+        totalRevenue: update.totalRevenue,
+        accountBalance: update.accountBalance,
+        periodRevenue: (prev.periodRevenue || 0) + (update.revenueAdded || 0),
+        periodCoupons: (prev.periodCoupons || 0) + (update.couponCount || 0),
+      } : null)
     }
   )
 
   // Fetch analytics on component mount
   useEffect(() => {
     fetchAnalytics()
+    fetchRevenue()
   }, [])
 
   // Request real-time update
@@ -46,12 +85,13 @@ export function VendorAnalytics() {
         try {
           const user = JSON.parse(userStr)
           requestAnalyticsUpdate(user.id)
+          requestRevenueUpdate(user.id)
         } catch (error) {
           console.error('Failed to get vendor ID:', error)
         }
       }
     }
-  }, [isConnected, requestAnalyticsUpdate])
+  }, [isConnected, requestAnalyticsUpdate, requestRevenueUpdate])
 
   const fetchAnalytics = async () => {
     try {
@@ -76,6 +116,25 @@ export function VendorAnalytics() {
       })
     } finally {
       setLoading(false)
+    }
+  }
+
+  const fetchRevenue = async () => {
+    try {
+      const period = dateRange === 'month' ? '30' : dateRange === 'week' ? '7' : dateRange === 'year' ? '365' : '1'
+      const response = await fetch(`${API_BASE_URL}/vendor/revenue?period=${period}`, {
+        headers: getHeaders(),
+      })
+
+      if (!response.ok) throw new Error('Failed to fetch revenue')
+
+      const data = await response.json()
+      if (data.success && data.data) {
+        setRevenueData(data.data)
+      }
+    } catch (error: any) {
+      console.error('Error fetching revenue:', error)
+      // Silently fail, don't show toast
     }
   }
 
@@ -107,6 +166,13 @@ export function VendorAnalytics() {
     { category: 'Total Discount', count: `₹${(analytics?.totalDiscount || 0) / 100000}L`, growth: '+22.4%' },
   ]
 
+  const revenueStats = [
+    { category: 'Total Revenue', count: `₹${(revenueData?.totalRevenue || 0).toLocaleString('en-IN')}`, growth: revenueData?.period || '' },
+    { category: 'Account Balance', count: `₹${(revenueData?.accountBalance || 0).toLocaleString('en-IN')}`, growth: 'Available' },
+    { category: 'Period Revenue', count: `₹${(revenueData?.periodRevenue || 0).toLocaleString('en-IN')}`, growth: revenueData?.period || '' },
+    { category: 'Period Coupons', count: revenueData?.periodCoupons || 0, growth: 'Sales' },
+  ]
+
   if (loading) {
     return (
       <main className="p-4 sm:p-6 lg:p-8 space-y-8">
@@ -134,6 +200,7 @@ export function VendorAnalytics() {
               onClick={() => {
                 setDateRange(range)
                 fetchAnalytics()
+                fetchRevenue()
               }}
               className={`px-4 py-2 rounded-lg transition-all text-sm font-medium ${
                 dateRange === range
@@ -183,6 +250,39 @@ export function VendorAnalytics() {
             <TrendingUp size={12} className="text-green-600" />
             <span className="text-green-600">+5.1%</span> increase
           </p>
+        </div>
+      </div>
+
+      {/* Revenue Metrics */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+        <div className="bg-gradient-to-br from-emerald-50 to-emerald-100 border border-emerald-200 rounded-xl p-6">
+          <div className="flex items-center gap-2 mb-2">
+            <DollarSign size={16} className="text-emerald-600" />
+            <p className="text-gray-600 text-sm font-medium">Total Revenue</p>
+          </div>
+          <p className="text-3xl font-bold text-emerald-900 mt-2">₹{(revenueData?.totalRevenue || 0).toLocaleString('en-IN')}</p>
+          <p className="text-xs text-gray-600 mt-2">Lifetime earnings</p>
+        </div>
+
+        <div className="bg-gradient-to-br from-teal-50 to-teal-100 border border-teal-200 rounded-xl p-6">
+          <div className="flex items-center gap-2 mb-2">
+            <Wallet size={16} className="text-teal-600" />
+            <p className="text-gray-600 text-sm font-medium">Account Balance</p>
+          </div>
+          <p className="text-3xl font-bold text-teal-900 mt-2">₹{(revenueData?.accountBalance || 0).toLocaleString('en-IN')}</p>
+          <p className="text-xs text-gray-600 mt-2">Available to withdraw</p>
+        </div>
+
+        <div className="bg-gradient-to-br from-cyan-50 to-cyan-100 border border-cyan-200 rounded-xl p-6">
+          <p className="text-gray-600 text-sm font-medium">Period Revenue</p>
+          <p className="text-3xl font-bold text-cyan-900 mt-2">₹{(revenueData?.periodRevenue || 0).toLocaleString('en-IN')}</p>
+          <p className="text-xs text-gray-600 mt-2">{revenueData?.period || 'This period'}</p>
+        </div>
+
+        <div className="bg-gradient-to-br from-lime-50 to-lime-100 border border-lime-200 rounded-xl p-6">
+          <p className="text-gray-600 text-sm font-medium">Period Sales</p>
+          <p className="text-3xl font-bold text-lime-900 mt-2">{revenueData?.periodCoupons || 0}</p>
+          <p className="text-xs text-gray-600 mt-2">Coupons sold {revenueData?.period || ''}</p>
         </div>
       </div>
 

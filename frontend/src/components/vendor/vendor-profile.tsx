@@ -1,10 +1,12 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Edit2, Save, X, Upload, Camera } from 'lucide-react'
+import { Edit2, Save, Upload } from 'lucide-react'
 import { useRealtimeVendor } from '../../hooks/useRealtimeVendor'
 import { useToast } from '../../hooks/use-toast'
 import { getHeaders, API_BASE_URL } from '../../lib/api'
+import { VendorLiveLocation } from './vendor-live-location'
+import { VendorLocationMap } from './vendor-location-map'
 
 interface ProfileData {
   businessName?: string
@@ -24,7 +26,6 @@ interface ProfileData {
 
 export function VendorProfile() {
   const [isEditing, setIsEditing] = useState(false)
-  const [loading, setLoading] = useState(true)
   const [profileData, setProfileData] = useState<ProfileData>({
     businessName: '',
     businessType: '',
@@ -45,7 +46,7 @@ export function VendorProfile() {
   const { toast } = useToast()
 
   // Real-time vendor hook
-  const { isConnected } = useRealtimeVendor(
+  useRealtimeVendor(
     undefined,
     undefined,
     undefined,
@@ -69,7 +70,6 @@ export function VendorProfile() {
 
   const fetchProfile = async () => {
     try {
-      setLoading(true)
       const response = await fetch(`${API_BASE_URL}/vendor/profile`, {
         headers: getHeaders(),
       })
@@ -88,8 +88,6 @@ export function VendorProfile() {
         description: error.message || 'Failed to load profile',
         variant: 'destructive',
       })
-    } finally {
-      setLoading(false)
     }
   }
 
@@ -342,6 +340,12 @@ export function VendorProfile() {
           </div>
         </div>
       </div>
+
+      {/* Live Location Section */}
+      <VendorLiveLocation isEditing={isEditing} />
+
+      {/* Location Map Section */}
+      <VendorLocationMap vendorData={profileData} />
 
       {/* Contact Information */}
       <div className="bg-white rounded-xl border border-gray-200 p-6 sm:p-8 hover:shadow-md transition-all space-y-6">

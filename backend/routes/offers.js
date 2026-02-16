@@ -126,9 +126,9 @@ router.post('/create', upload.single('image'), authenticateToken, authorizeRole(
       maxRedemptions: Number(maxRedemptions) || 0,
       termsAndConditions,
       image: imageUrl,
-      status: 'pending', // Set to pending for admin approval
-      approvalStatus: 'pending', // Pending admin approval
-      isActive: false, // Deactivate until approved
+      status: 'active', // Auto-approve for testing/demo
+      approvalStatus: 'approved', // Auto-approve for testing/demo
+      isActive: true, // Activate immediately for testing/demo
     });
 
     await offer.save();
@@ -136,20 +136,25 @@ router.post('/create', upload.single('image'), authenticateToken, authorizeRole(
     // Emit real-time event to the vendor
     io.to(`vendor:${req.user.id}`).emit('offer:created', {
       offer,
-      message: 'Offer created successfully and is pending admin approval',
+      message: 'Offer created successfully and is now live',
       timestamp: new Date()
     });
 
-    // Broadcast to all vendors for awareness
-    io.to('vendors').emit('vendor:offer:created', {
+    // Broadcast to all students for real-time update
+    io.emit('offer:new', {
+      offer,
       vendorId: req.user.id,
-      offerId: offer._id,
-      title: offer.title,
+      timestamp: new Date()
+    });
+
+    // Broadcast to all connected clients
+    io.emit('vendors:updated', {
+      message: 'New offer available',
       timestamp: new Date()
     });
 
     res.status(201).json({ 
-      message: 'Offer created successfully and is pending admin approval', 
+      message: 'Offer created successfully and is now live for students', 
       offer,
       success: true
     });

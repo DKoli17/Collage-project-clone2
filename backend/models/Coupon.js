@@ -18,14 +18,46 @@ const couponSchema = new mongoose.Schema({
   },
   vendor: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
+    ref: 'Vendor',
     required: true,
+  },
+  // Student who generated this coupon
+  student: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Student',
+    default: null,
+  },
+  // Amount paid by student to vendor
+  amountPaid: {
+    type: Number,
+    default: null,
+  },
+  // Coupon type: 'vendor-created' or 'student-generated'
+  couponType: {
+    type: String,
+    enum: ['vendor-created', 'student-generated'],
+    default: 'vendor-created',
   },
   startDate: Date,
   endDate: Date,
+  issueDate: {
+    type: Date,
+    default: Date.now,
+  },
+  expiryDate: {
+    type: Date,
+    default: () => new Date(Date.now() + 90 * 24 * 60 * 60 * 1000), // 90 days from now
+  },
+  originalPrice: Number,
+  discountedPrice: Number,
   isActive: {
     type: Boolean,
     default: true,
+  },
+  status: {
+    type: String,
+    enum: ['active', 'used', 'expired'],
+    default: 'active',
   },
   // Approval workflow fields
   approvalStatus: {

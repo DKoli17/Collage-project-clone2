@@ -16,8 +16,6 @@ export function VendorStudentOrderPage() {
   const handleTabChange = (tab: string) => {
     if (tab === 'discounts') {
       navigate('/vendor/studentdiscounts')
-    } else if (tab === 'products') {
-      navigate('/vendor/products')
     } else if (tab === 'verification') {
       navigate('/vendor/studentdiscountverification')
     } else if (tab === 'orders') {

@@ -9,7 +9,7 @@ import { MyCoupons } from './my-coupons';
 import { SavedOffers } from './saved-offers';
 import { NotificationsPanel } from './notifications-panel';
 import { HelpSupport } from './help-support';
-import { getStudentDiscounts, getActiveCoupons, getVerificationStatus } from '../../lib/studentAPI';
+import { getStudentDiscounts, getActiveCoupons, getVerificationStatus, getStudentLocation } from '../../lib/studentAPI';
 import { useAuthStore } from '../../stores/authStore';
 import { useRealtimeUpdates } from '../../hooks/useRealtimeUpdates';
 
@@ -67,6 +67,15 @@ interface StudentProfile {
   profileImage?: string;
 }
 
+interface StudentLocation {
+  latitude?: number;
+  longitude?: number;
+  city?: string;
+  state?: string;
+  locality?: string;
+  postalCode?: string;
+}
+
 // Mock notifications
 const mockNotifications: Notification[] = [
   {
@@ -100,6 +109,7 @@ export function StudentDashboardPage() {
   const [totalSaved, setTotalSaved] = useState(0);
   const [approvalStatus, setApprovalStatus] = useState<'pending' | 'approved' | 'rejected'>('pending');
   const [claimLoading, setClaimLoading] = useState<string | null>(null);
+  const [studentLocation, setStudentLocation] = useState<StudentLocation | null>(null);
   const { token, user, updateUser } = useAuthStore();
 
   const studentProfile: StudentProfile = {
@@ -133,6 +143,7 @@ export function StudentDashboardPage() {
       fetchDiscounts();
       fetchCoupons();
       fetchSavedOffers();
+      fetchStudentLocation();
 
       // Refresh approval status every 30 seconds to catch admin updates
       const approvalStatusInterval = setInterval(() => {
@@ -142,6 +153,24 @@ export function StudentDashboardPage() {
       return () => clearInterval(approvalStatusInterval);
     }
   }, [token]);
+
+  const fetchStudentLocation = async () => {
+    try {
+      const result = await getStudentLocation();
+      if (result.data) {
+        setStudentLocation({
+          latitude: result.data.latitude,
+          longitude: result.data.longitude,
+          city: result.data.city,
+          state: result.data.state,
+          locality: result.data.locality,
+          postalCode: result.data.postalCode,
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching student location:', error);
+    }
+  };
 
   const fetchApprovalStatus = async () => {
     try {
@@ -311,7 +340,6 @@ export function StudentDashboardPage() {
                   key={discount.id}
                   {...discount}
                   isSaved={savedOfferIds.has(discount.id)}
-                  isApproved={true}
                   isLoading={claimLoading === discount.id}
                   onSave={handleSaveOffer}
                   onClaim={handleClaimDiscount}
@@ -332,8 +360,8 @@ export function StudentDashboardPage() {
                   key={discount.id}
                   {...discount}
                   isSaved={savedOfferIds.has(discount.id)}
-                  isApproved={true}
                   isLoading={claimLoading === discount.id}
+                  studentLocation={studentLocation || undefined}
                   onSave={handleSaveOffer}
                   onClaim={handleClaimDiscount}
                 />
@@ -346,8 +374,7 @@ export function StudentDashboardPage() {
           <>
             <h1 className="text-3xl font-bold text-gray-900 mb-6">My Coupons</h1>
             <MyCoupons 
-              coupons={coupons} 
-              isApproved={approvalStatus === 'approved'}
+              coupons={coupons}
             />
           </>
         )

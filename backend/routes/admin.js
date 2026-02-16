@@ -4,11 +4,30 @@ import Admin from '../models/Admin.js';
 import Vendor from '../models/Vendor.js';
 import Offer from '../models/Offer.js';
 import Coupon from '../models/Coupon.js';
+import CouponPurchase from '../models/CouponPurchase.js';
 import VerificationDocument from '../models/VerificationDocument.js';
 import { authenticateToken, authorizeRole } from '../middleware/auth.js';
 import { io } from '../server.js';
+import mongoose from 'mongoose';
 
 const router = express.Router();
+
+// Helper function to safely emit socket events without crashing the endpoint
+function safeEmit(room, event, data) {
+  try {
+    if (io) {
+      if (room === null) {
+        // Global emit
+        io.emit(event, data);
+      } else {
+        // Room-specific emit
+        io.to(room).emit(event, data);
+      }
+    }
+  } catch (error) {
+    console.warn(`Warning: Failed to emit socket event ${event}:`, error.message);
+  }
+}
 
 // DEBUG: Check if students exist in database
 router.get('/debug/students-count', async (req, res) => {
@@ -207,7 +226,7 @@ router.post('/students/:studentId/verify', authenticateToken, authorizeRole('adm
     }
 
     // Broadcast real-time update
-    io.emit('student:verification-updated', {
+    safeEmit(null, 'student:verification-updated', {
       studentId: req.params.studentId,
       verificationStatus: status,
       student,
@@ -265,13 +284,29 @@ router.post('/students/:studentId/approval', authenticateToken, authorizeRole('a
     }
 
     // Broadcast real-time update to all connected admins
-    io.emit('student:status-updated', {
-      studentId: req.params.studentId,
-      approvalStatus,
-      student,
-      changedBy: req.user.id,
-      timestamp: new Date()
-    });
+    const io = req.io;
+    if (io) {
+      // Emit to admins
+      io.to('admins').emit('student:status-updated', {
+        studentId: req.params.studentId,
+        approvalStatus,
+        student,
+        changedBy: req.user.id,
+        timestamp: new Date()
+      });
+
+      // Emit to student
+      io.to(`student:${req.params.studentId}`).emit('student:approval-status:updated', {
+        status: approvalStatus,
+        message: approvalStatus === 'approved' ? 
+          'Congratulations! Your account has been approved.' : 
+          'Your account has been rejected.',
+        remarks,
+        timestamp: new Date()
+      });
+
+      console.log(`📡 Student ${req.params.studentId} approval status changed to ${approvalStatus}`);
+    }
 
     // Email notifications removed
 
@@ -437,7 +472,7 @@ router.delete('/offers/:offerId', authenticateToken, authorizeRole('admin'), asy
     }
 
     // Notify vendor that their offer was deleted
-    io.to(`vendor:${offer.vendor}`).emit('admin:offer-deleted', {
+    safeEmit(`vendor:${offer.vendor}`, 'admin:offer-deleted', {
       offerId: offer._id,
       title: offer.title,
       reason: 'Offer deleted by admin',
@@ -473,7 +508,7 @@ router.patch('/offers/:offerId/toggle', authenticateToken, authorizeRole('admin'
     await offer.save();
 
     // Notify vendor about status change
-    io.to(`vendor:${offer.vendor}`).emit('admin:offer-status-changed', {
+    safeEmit(`vendor:${offer.vendor}`, 'admin:offer-status-changed', {
       offerId: offer._id,
       title: offer.title,
       isActive: offer.isActive,
@@ -483,7 +518,7 @@ router.patch('/offers/:offerId/toggle', authenticateToken, authorizeRole('admin'
 
     // Notify students if offer is activated
     if (offer.isActive) {
-      io.emit('student:offer-activated', {
+      safeEmit(null, 'student:offer-activated', {
         offerId: offer._id,
         title: offer.title,
         discount: offer.discount,
@@ -567,7 +602,7 @@ router.delete('/users/:userId', authenticateToken, authorizeRole('admin'), async
     }
 
     // Broadcast real-time deletion to all connected admins
-    io.emit('user:deleted', {
+    safeEmit(null, 'user:deleted', {
       userId: req.params.userId,
       userType: user.role || 'student',
       deletedBy: req.user.id,
@@ -649,8 +684,15 @@ router.post('/coupons/:couponId/approve', authenticateToken, authorizeRole('admi
     coupon.approvalDate = new Date();
     await coupon.save();
 
+    // Add coupon to vendor's coupons array
+    await Vendor.findByIdAndUpdate(
+      coupon.vendor,
+      { $addToSet: { coupons: coupon._id } },
+      { new: true }
+    );
+
     // Broadcast approval event
-    io.emit('coupon:approved', {
+    safeEmit(null, 'coupon:approved', {
       couponId: coupon._id,
       code: coupon.code,
       vendor: coupon.vendor,
@@ -699,7 +741,7 @@ router.post('/coupons/:couponId/reject', authenticateToken, authorizeRole('admin
     await coupon.save();
 
     // Broadcast rejection event
-    io.emit('coupon:rejected', {
+    safeEmit(null, 'coupon:rejected', {
       couponId: coupon._id,
       code: coupon.code,
       vendor: coupon.vendor,
@@ -776,24 +818,41 @@ router.post('/offers/:offerId/approve', authenticateToken, authorizeRole('admin'
     // Populate vendor info for broadcast
     await offer.populate('vendor', 'name');
 
-    // Broadcast approval event to vendor and students
-    io.to(`vendor:${offer.vendor._id}`).emit('vendor:notification:offer-approved', {
-      offerId: offer._id,
-      title: offer.title,
-      message: `Your offer "${offer.title}" has been approved`,
-      timestamp: new Date(),
-      status: 'success'
-    });
+    // Broadcast approval event to all parties
+    const io = req.io;
+    if (io) {
+      // Emit to vendor
+      io.to(`vendor:${offer.vendor._id}`).emit('vendor:notification:offer-approved', {
+        offerId: offer._id,
+        title: offer.title,
+        message: `Your offer "${offer.title}" has been approved`,
+        timestamp: new Date(),
+        status: 'success'
+      });
 
-    // Notify all students about the newly approved offer
-    io.emit('student:offer-approved', {
-      offerId: offer._id,
-      title: offer.title,
-      discount: offer.discount,
-      discountType: offer.discountType,
-      category: offer.category,
-      timestamp: new Date()
-    });
+      // Notify all students about the newly approved offer
+      io.to('all-students').emit('student:offer-approved', {
+        offerId: offer._id,
+        title: offer.title,
+        discount: offer.discount,
+        discountType: offer.discountType,
+        category: offer.category,
+        timestamp: new Date()
+      });
+
+      // Notify all admins about the approval
+      io.to('admins').emit('admin:offer-approval-changed', {
+        offerId: offer._id,
+        vendorId: offer.vendor._id,
+        vendorName: offer.vendor.name,
+        offerTitle: offer.title,
+        action: 'approved',
+        approvedBy: req.user.id,
+        timestamp: new Date()
+      });
+
+      console.log(`📡 Offer ${offer._id} approved - events emitted to vendor, students, and admins`);
+    }
 
     res.json({
       success: true,
@@ -839,7 +898,7 @@ router.post('/offers/:offerId/reject', authenticateToken, authorizeRole('admin')
     await offer.populate('vendor', 'name');
 
     // Broadcast rejection event to vendor
-    io.to(`vendor:${offer.vendor._id}`).emit('vendor:notification:offer-rejected', {
+    safeEmit(`vendor:${offer.vendor._id}`, 'vendor:notification:offer-rejected', {
       offerId: offer._id,
       title: offer.title,
       message: `Your offer "${offer.title}" has been rejected`,
@@ -996,7 +1055,7 @@ router.put('/vendors/:vendorId/approve', authenticateToken, authorizeRole('admin
     }
 
     // Broadcast real-time notification
-    io.emit('admin:vendor-approval:updated', {
+    safeEmit(null, 'admin:vendor-approval:updated', {
       vendorId: vendor._id,
       vendorName: vendor.name,
       status: 'approved',
@@ -1040,7 +1099,7 @@ router.put('/vendors/:vendorId/reject', authenticateToken, authorizeRole('admin'
     }
 
     // Broadcast real-time notification
-    io.emit('admin:vendor-approval:updated', {
+    safeEmit(null, 'admin:vendor-approval:updated', {
       vendorId: vendor._id,
       vendorName: vendor.name,
       status: 'rejected',
@@ -1084,7 +1143,7 @@ router.put('/vendors/:vendorId/suspend', authenticateToken, authorizeRole('admin
     }
 
     // Broadcast real-time notification
-    io.emit('admin:vendor-suspension:updated', {
+    safeEmit(null, 'admin:vendor-suspension:updated', {
       vendorId: vendor._id,
       vendorName: vendor.name,
       suspended: true,
@@ -1126,7 +1185,7 @@ router.put('/vendors/:vendorId/activate', authenticateToken, authorizeRole('admi
     }
 
     // Broadcast real-time notification
-    io.emit('admin:vendor-suspension:updated', {
+    safeEmit(null, 'admin:vendor-suspension:updated', {
       vendorId: vendor._id,
       vendorName: vendor.name,
       suspended: false,
@@ -1176,7 +1235,7 @@ router.put('/vendors/:vendorId/verify', authenticateToken, authorizeRole('admin'
     }
 
     // Broadcast real-time notification
-    io.emit('admin:vendor-verification:updated', {
+    safeEmit(null, 'admin:vendor-verification:updated', {
       vendorId: vendor._id,
       vendorName: vendor.name,
       verificationStatus,
@@ -1219,6 +1278,441 @@ router.get('/vendors/:vendorId', authenticateToken, authorizeRole('admin'), asyn
       message: 'Failed to fetch vendor',
       error: error.message,
     });
+  }
+});
+
+// ==================== COUPON CREATION ROUTES ====================
+
+// Create a new vendor coupon
+router.post('/coupons', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const { code, description, discount, discountType, vendorId, startDate, endDate, maxRedemptions, category, termsAndConditions, isActive } = req.body;
+
+    // Validate required fields
+    if (!code || !discount || !vendorId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required fields: code, discount, vendorId',
+      });
+    }
+
+    // Check if vendor exists
+    const vendor = await Vendor.findById(vendorId);
+    if (!vendor) {
+      return res.status(404).json({
+        success: false,
+        message: 'Vendor not found',
+      });
+    }
+
+    // Check if coupon code already exists
+    const existingCoupon = await Coupon.findOne({ code });
+    if (existingCoupon) {
+      return res.status(400).json({
+        success: false,
+        message: 'Coupon code already exists',
+      });
+    }
+
+    // Create the coupon
+    const newCoupon = new Coupon({
+      code,
+      description,
+      discount,
+      discountType: discountType || 'percentage',
+      vendor: vendorId,
+      couponType: 'vendor-created',
+      status: 'active', // Mark as active
+      isActive: isActive !== false, // Default to true if not specified
+      approvalStatus: 'approved', // Admin-created coupons are auto-approved
+      approvedBy: req.user.id,
+      approvalDate: new Date(),
+      startDate,
+      endDate,
+      maxRedemptions,
+      category,
+      termsAndConditions,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const savedCoupon = await newCoupon.save();
+
+    // Add coupon to vendor's coupons array
+    await Vendor.findByIdAndUpdate(
+      vendorId,
+      { $addToSet: { coupons: savedCoupon._id } },
+      { new: true }
+    );
+
+    // Emit socket event for real-time updates
+    safeEmit(null, 'coupon:created', {
+      couponId: savedCoupon._id,
+      vendorId: vendorId,
+      code: savedCoupon.code,
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Coupon created successfully',
+      data: savedCoupon,
+    });
+  } catch (error) {
+    console.error('Error creating coupon:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to create coupon',
+      error: error.message,
+    });
+  }
+});
+
+// Update a vendor coupon
+router.put('/coupons/:couponId', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const { couponId } = req.params;
+    const { description, discount, discountType, startDate, endDate, maxRedemptions, category, isActive } = req.body;
+
+    const coupon = await Coupon.findByIdAndUpdate(
+      couponId,
+      {
+        description,
+        discount,
+        discountType,
+        startDate,
+        endDate,
+        maxRedemptions,
+        category,
+        isActive,
+        updatedAt: new Date(),
+      },
+      { new: true }
+    );
+
+    if (!coupon) {
+      return res.status(404).json({
+        success: false,
+        message: 'Coupon not found',
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Coupon updated successfully',
+      data: coupon,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update coupon',
+      error: error.message,
+    });
+  }
+});
+
+// Delete a vendor coupon
+router.delete('/coupons/:couponId', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const { couponId } = req.params;
+
+    const coupon = await Coupon.findByIdAndDelete(couponId);
+
+    if (!coupon) {
+      return res.status(404).json({
+        success: false,
+        message: 'Coupon not found',
+      });
+    }
+
+    // Emit socket event for real-time updates
+    safeEmit(null, 'coupon:deleted', {
+      couponId: coupon._id,
+      vendorId: coupon.vendor,
+    });
+
+    res.json({
+      success: true,
+      message: 'Coupon deleted successfully',
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete coupon',
+      error: error.message,
+    });
+  }
+});
+
+
+// ============================================
+// COUPON PURCHASE APPROVAL ENDPOINTS
+// ============================================
+
+/**
+ * GET /admin/coupon-purchases/pending-approval
+ * Get all coupon purchases pending admin approval
+ * Auth required: Admin
+ */
+router.get('/coupon-purchases/pending-approval', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const { limit = 20, page = 1 } = req.query;
+    const skip = (page - 1) * limit;
+
+    const purchases = await CouponPurchase.find({
+      adminApprovalStatus: 'pending',
+      vendorApprovalStatus: 'accepted' // Only show if vendor has accepted
+    })
+      .populate('studentId', 'name email enrollmentNumber collegeName')
+      .populate('vendorId', 'name businessName')
+      .populate('offerId', 'title description discountValue')
+      .limit(parseInt(limit))
+      .skip(skip)
+      .sort({ purchasedAt: -1 });
+
+    const total = await CouponPurchase.countDocuments({
+      adminApprovalStatus: 'pending',
+      vendorApprovalStatus: 'accepted'
+    });
+
+    res.json({
+      success: true,
+      message: 'Pending coupon purchases retrieved',
+      coupons: purchases,
+      pagination: {
+        total,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        pages: Math.ceil(total / limit),
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching pending coupon purchases:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch pending coupon purchases',
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /admin/coupon-purchases
+ * Get all coupon purchases with filters
+ * Auth required: Admin
+ */
+router.get('/coupon-purchases', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const { adminApprovalStatus, vendorApprovalStatus, limit = 20, page = 1 } = req.query;
+    const skip = (page - 1) * limit;
+
+    let filter = {};
+    if (adminApprovalStatus) filter.adminApprovalStatus = adminApprovalStatus;
+    if (vendorApprovalStatus) filter.vendorApprovalStatus = vendorApprovalStatus;
+
+    const purchases = await CouponPurchase.find(filter)
+      .populate('studentId', 'name email enrollmentNumber collegeName')
+      .populate('vendorId', 'name businessName')
+      .populate('offerId', 'title description')
+      .populate('adminApprovedBy', 'name email')
+      .limit(parseInt(limit))
+      .skip(skip)
+      .sort({ purchasedAt: -1 });
+
+    const total = await CouponPurchase.countDocuments(filter);
+
+    res.json({
+      success: true,
+      message: 'Coupon purchases retrieved',
+      coupons: purchases,
+      pagination: {
+        total,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        pages: Math.ceil(total / limit),
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching coupon purchases:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch coupon purchases',
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * POST /admin/coupon-purchases/:couponPurchaseId/approve
+ * Admin approves a coupon purchase for student to use
+ * Auth required: Admin
+ * Body: { approvalRemarks: string (optional) }
+ */
+router.post('/coupon-purchases/:couponPurchaseId/approve', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const { couponPurchaseId } = req.params;
+    const adminId = req.user.id;
+    const { approvalRemarks } = req.body;
+
+    // Validate coupon purchase exists
+    const couponPurchase = await CouponPurchase.findById(
+      new mongoose.Types.ObjectId(couponPurchaseId)
+    ).session(session);
+
+    if (!couponPurchase) {
+      await session.abortTransaction();
+      return res.status(404).json({
+        success: false,
+        message: 'Coupon purchase not found',
+      });
+    }
+
+    // Check authorization - must have vendor acceptance first
+    if (couponPurchase.vendorApprovalStatus !== 'accepted') {
+      await session.abortTransaction();
+      return res.status(400).json({
+        success: false,
+        message: 'Vendor must accept the coupon before admin approval',
+        vendorStatus: couponPurchase.vendorApprovalStatus,
+      });
+    }
+
+    // Check if already approved/rejected
+    if (couponPurchase.adminApprovalStatus !== 'pending') {
+      await session.abortTransaction();
+      return res.status(400).json({
+        success: false,
+        message: `Coupon is already ${couponPurchase.adminApprovalStatus}`,
+      });
+    }
+
+    // Update coupon approval status
+    couponPurchase.adminApprovalStatus = 'approved';
+    couponPurchase.adminApprovedAt = new Date();
+    couponPurchase.adminApprovedBy = new mongoose.Types.ObjectId(adminId);
+    if (approvalRemarks) {
+      couponPurchase.adminApprovalRemarks = approvalRemarks;
+    }
+
+    await couponPurchase.save({ session });
+    await session.commitTransaction();
+
+    // Emit real-time notification
+    safeEmit(null, 'coupon:admin-approved', {
+      couponPurchaseId: couponPurchase._id,
+      couponCode: couponPurchase.couponCode,
+      studentId: couponPurchase.studentId,
+      vendorId: couponPurchase.vendorId,
+      approvedAt: couponPurchase.adminApprovedAt,
+    });
+
+    res.json({
+      success: true,
+      message: '✅ Coupon has been approved! Student can now use this coupon.',
+      coupon: {
+        _id: couponPurchase._id,
+        couponCode: couponPurchase.couponCode,
+        adminApprovalStatus: couponPurchase.adminApprovalStatus,
+        approvedAt: couponPurchase.adminApprovedAt,
+      },
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    console.error('Error approving coupon purchase:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to approve coupon purchase',
+      error: error.message,
+    });
+  } finally {
+    session.endSession();
+  }
+});
+
+/**
+ * POST /admin/coupon-purchases/:couponPurchaseId/reject
+ * Admin rejects a coupon purchase
+ * Auth required: Admin
+ * Body: { rejectionReason: string (required) }
+ */
+router.post('/coupon-purchases/:couponPurchaseId/reject', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const { couponPurchaseId } = req.params;
+    const adminId = req.user.id;
+    const { rejectionReason } = req.body;
+
+    if (!rejectionReason) {
+      await session.abortTransaction();
+      return res.status(400).json({
+        success: false,
+        message: 'Rejection reason is required',
+      });
+    }
+
+    // Validate coupon purchase exists
+    const couponPurchase = await CouponPurchase.findById(
+      new mongoose.Types.ObjectId(couponPurchaseId)
+    ).session(session);
+
+    if (!couponPurchase) {
+      await session.abortTransaction();
+      return res.status(404).json({
+        success: false,
+        message: 'Coupon purchase not found',
+      });
+    }
+
+    // Check if already approved/rejected
+    if (couponPurchase.adminApprovalStatus !== 'pending') {
+      await session.abortTransaction();
+      return res.status(400).json({
+        success: false,
+        message: `Coupon is already ${couponPurchase.adminApprovalStatus}`,
+      });
+    }
+
+    // Update coupon status to rejected
+    couponPurchase.adminApprovalStatus = 'rejected';
+    couponPurchase.adminApprovedAt = new Date();
+    couponPurchase.adminApprovedBy = new mongoose.Types.ObjectId(adminId);
+    couponPurchase.adminRejectionReason = rejectionReason;
+
+    await couponPurchase.save({ session });
+    await session.commitTransaction();
+
+    // Emit real-time notification
+    safeEmit(null, 'coupon:admin-rejected', {
+      couponPurchaseId: couponPurchase._id,
+      couponCode: couponPurchase.couponCode,
+      studentId: couponPurchase.studentId,
+      rejectionReason: rejectionReason,
+    });
+
+    res.json({
+      success: true,
+      message: '❌ Coupon has been rejected.',
+      coupon: {
+        _id: couponPurchase._id,
+        couponCode: couponPurchase.couponCode,
+        adminApprovalStatus: couponPurchase.adminApprovalStatus,
+        rejectionReason: couponPurchase.adminRejectionReason,
+      },
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    console.error('Error rejecting coupon purchase:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to reject coupon purchase',
+      error: error.message,
+    });
+  } finally {
+    session.endSession();
   }
 });
 

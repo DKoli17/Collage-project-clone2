@@ -80,7 +80,11 @@ export function useRealtimeUpdates(
     }
 
     try {
-      const socket = io('http://localhost:5000', {
+      const socketUrl = import.meta.env.VITE_SOCKET_URL || 
+                       import.meta.env.VITE_API_URL?.replace('/api', '') || 
+                       'http://localhost:5000';
+      
+      const socket = io(socketUrl, {
         auth: {
           token,
           userId,
@@ -102,6 +106,8 @@ export function useRealtimeUpdates(
           socket.emit('admin:join', userId);
         } else if (userRole === 'vendor') {
           socket.emit('vendor:join', userId);
+        } else if (userRole === 'student') {
+          socket.emit('student:join', userId);
         }
         
         onConnectionStatusChange?.(true);

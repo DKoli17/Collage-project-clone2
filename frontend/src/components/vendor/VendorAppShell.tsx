@@ -7,13 +7,12 @@ import { VendorSidebar } from './vendor-sidebar'
 import { VendorTopBar } from './vendor-topbar'
 import { VendorDashboardOverview } from './vendor-dashboard-overview'
 import { VendorProfile } from './vendor-profile'
-import { VendorProducts } from './vendor-products'
 import { VendorDiscounts } from './vendor-discounts'
-import { StudentVerification } from './student-verification'
-import { VendorOrders } from './vendor-orders'
 import { VendorAnalytics } from './vendor-analytics'
 import { VendorNotifications } from './vendor-notifications'
 import { VendorCouponClaims } from './vendor-coupon-claims'
+import { VendorCouponPurchases } from './vendor-coupon-purchases'
+import { VendorRevenueAnalytics } from './vendor-revenue-dashboard'
 
 export function VendorAppShell() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
@@ -57,11 +56,10 @@ export function VendorAppShell() {
           <div className="px-3 sm:px-6 md:px-8 lg:px-16 py-6 sm:py-8 md:py-12 lg:py-16">
             <Routes>
               <Route path="/dashboard" element={<VendorDashboardOverview />} />
-              <Route path="/products" element={<VendorProducts />} />
               <Route path="/discounts" element={<VendorDiscounts />} />
-              <Route path="/verification" element={<StudentVerification />} />
-              <Route path="/orders" element={<VendorOrders />} />
               <Route path="/coupons" element={<VendorCouponClaims />} />
+              <Route path="/coupon-purchases" element={<VendorCouponPurchases />} />
+              <Route path="/revenue" element={<VendorRevenueAnalytics />} />
               <Route path="/analytics" element={<VendorAnalytics />} />
               <Route path="/notifications" element={<VendorNotifications />} />
               <Route path="/profile" element={<VendorProfile />} />

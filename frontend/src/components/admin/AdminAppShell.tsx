@@ -5,12 +5,12 @@ import { AdminSidebar } from './AdminSidebar';
 import { AdminTopBar } from './AdminTopBar';
 import { AdminDashboard } from './AdminDashboard';
 import { AdminStudents } from './AdminStudents';
-import { AdminOffers } from './AdminOffers';
 import { AdminCoupons } from './AdminCoupons';
 import { AdminVerifications } from './AdminVerifications';
 import { AdminSettings } from './AdminSettings';
 import { AdminAnalytics } from './AdminAnalytics';
 import { AdminVendorManagement } from './AdminVendors';
+import { AdminCouponPurchaseApproval } from './AdminCouponPurchaseApproval';
 
 // Placeholder for AdminUserManagement
 const AdminUserManagement = () => (
@@ -64,8 +64,8 @@ export function AdminAppShell() {
               <Route path="/dashboard" element={<AdminDashboard />} />
               <Route path="/students" element={<AdminStudents />} />
               <Route path="/vendors" element={<AdminVendorManagement />} />
-              <Route path="/offers" element={<AdminOffers />} />
               <Route path="/coupons" element={<AdminCoupons />} />
+              <Route path="/coupon-purchases" element={<AdminCouponPurchaseApproval />} />
               <Route path="/verifications" element={<AdminVerifications />} />
               <Route path="/analytics" element={<AdminAnalytics />} />
               <Route path="/user-management" element={<AdminUserManagement />} />

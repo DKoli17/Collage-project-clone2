@@ -3,7 +3,9 @@ import { StudentSidebar } from './dashboard/sidebar';
 import { StudentTopNav } from './dashboard/top-nav';
 import { AdvancedSearch } from './advanced-search';
 import { DiscountListingCard } from './discount-listing-card';
-import { getVerificationStatus } from '../../lib/studentAPI';
+import { LocationFilter } from './location-filter';
+import { VendorLocationModal } from './vendor-location-modal';
+import { getStudentLocation, getVendorsByLocation, getVendorLocation } from '../../lib/studentAPI';
 import { useAuthStore } from '../../stores/authStore';
 
 interface Discount {
@@ -12,8 +14,22 @@ interface Discount {
   title?: string;
   brandName?: string;
   vendor?: {
+    _id: string;
     name: string;
     businessName: string;
+    city?: string;
+    state?: string;
+    latitude?: number;
+    longitude?: number;
+    businessAddress?: string;
+    locality?: string;
+    postalCode?: string;
+    businessLogo?: string;
+    businessDescription?: string;
+    businessType?: string;
+    businessEmail?: string;
+    mobileNumber?: string;
+    website?: string;
   };
   discount?: number;
   discountPercentage?: number;
@@ -26,6 +42,26 @@ interface Discount {
   isLimitedTime?: boolean;
 }
 
+interface VendorData {
+  _id: string;
+  name: string;
+  businessName: string;
+  businessType?: string;
+  businessAddress?: string;
+  city?: string;
+  state?: string;
+  latitude?: number;
+  longitude?: number;
+  locality?: string;
+  postalCode?: string;
+  businessLogo?: string;
+  businessEmail?: string;
+  mobileNumber?: string;
+  website?: string;
+  businessDescription?: string;
+  distance?: string;
+}
+
 interface StudentProfile {
   name: string;
   email: string;
@@ -34,7 +70,15 @@ interface StudentProfile {
   course: string;
   yearOfStudy: string;
   studentId: string;
-  verificationStatus: 'verified' | 'pending' | 'rejected';
+}
+
+interface StudentLocation {
+  latitude?: number;
+  longitude?: number;
+  city?: string;
+  state?: string;
+  locality?: string;
+  postalCode?: string;
 }
 
 export function StudentDiscountPage() {
@@ -45,6 +89,12 @@ export function StudentDiscountPage() {
   const [error, setError] = useState<string | null>(null);
   const [claimError, setClaimError] = useState<string | null>(null);
   const [claimLoading, setClaimLoading] = useState<string | null>(null);
+  const [studentLocation, setStudentLocation] = useState<StudentLocation | null>(null);
+  const [filterMode, setFilterMode] = useState<'all' | 'nearby'>('all');
+  const [locationSearchActive, setLocationSearchActive] = useState(false);
+  const [selectedVendor, setSelectedVendor] = useState<VendorData | null>(null);
+  const [isLocationModalOpen, setIsLocationModalOpen] = useState(false);
+  const [originalDiscounts, setOriginalDiscounts] = useState<Discount[]>([]);
 
   const { user, token } = useAuthStore();
 
@@ -56,7 +106,6 @@ export function StudentDiscountPage() {
     course: 'B.Tech Computer Science',
     yearOfStudy: '3rd',
     studentId: 'STU-2024-001234',
-    verificationStatus: 'verified',
   };
 
   // Fetch real discounts from API
@@ -81,6 +130,24 @@ export function StudentDiscountPage() {
           id: offer._id,
           title: offer.title,
           brandName: offer.vendor?.businessName || offer.vendor?.name || 'Brand',
+          vendor: {
+            _id: offer.vendor?._id || '',
+            name: offer.vendor?.name || '',
+            businessName: offer.vendor?.businessName || '',
+            city: offer.vendor?.city,
+            state: offer.vendor?.state,
+            latitude: offer.vendor?.latitude,
+            longitude: offer.vendor?.longitude,
+            businessAddress: offer.vendor?.businessAddress,
+            locality: offer.vendor?.locality,
+            postalCode: offer.vendor?.postalCode,
+            businessLogo: offer.vendor?.businessLogo,
+            businessDescription: offer.vendor?.businessDescription,
+            businessType: offer.vendor?.businessType,
+            businessEmail: offer.vendor?.businessEmail,
+            mobileNumber: offer.vendor?.mobileNumber,
+            website: offer.vendor?.website,
+          },
           discount: offer.discountPercentage || offer.discount || 0,
           description: offer.description,
           expiryDate: offer.endDate ? new Date(offer.endDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : 'No expiry',
@@ -90,6 +157,7 @@ export function StudentDiscountPage() {
           isLimitedTime: offer.isLimitedTime || false,
         }));
         setDiscounts(transformedData);
+        setOriginalDiscounts(transformedData);
       } catch (err: any) {
         if (err.name === 'AbortError') {
           setError('Request timeout - please try again');
@@ -102,26 +170,101 @@ export function StudentDiscountPage() {
       }
     };
 
-    // Fetch approval status from backend
-    const fetchApprovalStatus = async () => {
+    fetchDiscounts();
+  }, [token]);
+
+  // Fetch student location
+  useEffect(() => {
+    const fetchStudentLocation = async () => {
       try {
-        const status = await getVerificationStatus();
-        // Approval status will be used from the user object in handleClaimDiscount
-      } catch (err) {
-        console.error('Error fetching approval status:', err);
+        const result = await getStudentLocation();
+        if (result.data) {
+          setStudentLocation({
+            latitude: result.data.latitude,
+            longitude: result.data.longitude,
+            city: result.data.city,
+            state: result.data.state,
+            locality: result.data.locality,
+            postalCode: result.data.postalCode,
+          });
+        }
+      } catch (error) {
+        console.error('Error fetching student location:', error);
       }
     };
 
-    fetchDiscounts();
-    fetchApprovalStatus();
+    if (token) {
+      fetchStudentLocation();
+    }
+  }, [token]);
 
-    // Refresh approval status every 30 seconds to catch admin updates
-    const approvalStatusInterval = setInterval(() => {
-      fetchApprovalStatus();
-    }, 30000);
+  const handleLocationSearch = async (latitude: number, longitude: number, radius: number) => {
+    try {
+      setLoading(true);
+      setError(null);
+      setFilterMode('nearby');
+      setLocationSearchActive(true);
+      
+      const response = await getVendorsByLocation(latitude, longitude, radius);
+      if (response.coupons) {
+        // Map coupons to discounts format
+        const discountsFromLocation = response.coupons.map((coupon: any) => ({
+          _id: coupon._id,
+          id: coupon._id,
+          title: coupon.title,
+          brandName: coupon.vendor?.businessName || coupon.vendor?.name || 'Brand',
+          vendor: {
+            _id: coupon.vendor?._id || '',
+            name: coupon.vendor?.name || '',
+            businessName: coupon.vendor?.businessName || '',
+            city: coupon.vendor?.city,
+            state: coupon.vendor?.state,
+            latitude: coupon.vendor?.latitude,
+            longitude: coupon.vendor?.longitude,
+            businessAddress: coupon.vendor?.businessAddress,
+            locality: coupon.vendor?.locality,
+            postalCode: coupon.vendor?.postalCode,
+            businessLogo: coupon.vendor?.businessLogo,
+            businessDescription: coupon.vendor?.businessDescription,
+            businessType: coupon.vendor?.businessType,
+            businessEmail: coupon.vendor?.businessEmail,
+            mobileNumber: coupon.vendor?.mobileNumber,
+            website: coupon.vendor?.website,
+          },
+          discount: coupon.discount || 0,
+          description: coupon.description,
+          expiryDate: coupon.expiryDate,
+          category: coupon.category || 'General',
+          isActive: true,
+          isExclusive: coupon.isExclusive,
+          isLimitedTime: coupon.isLimitedTime,
+        }));
+        setDiscounts(discountsFromLocation);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to fetch nearby vendors');
+      console.error('Error searching by location:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    return () => clearInterval(approvalStatusInterval);
-  }, []);
+  const handleClearLocation = () => {
+    setFilterMode('all');
+    setLocationSearchActive(false);
+    setDiscounts(originalDiscounts);
+  };
+
+  const handleViewVendorLocation = async (vendorId: string) => {
+    try {
+      const response = await getVendorLocation(vendorId);
+      setSelectedVendor(response.vendor);
+      setIsLocationModalOpen(true);
+    } catch (err) {
+      console.error('Error fetching vendor location:', err);
+      setError('Failed to fetch vendor location details');
+    }
+  };
 
   const handleSaveOffer = (id: string) => {
     const newSaved = new Set(savedOfferIds);
@@ -187,6 +330,28 @@ export function StudentDiscountPage() {
             <h1 className="text-3xl font-bold text-gray-900 mb-4">All Discounts</h1>
             <AdvancedSearch onSearch={() => {}} onFilterChange={() => {}} />
 
+            {!loading && (
+              <>
+                {/* Location Filter Section */}
+                <div className="mb-8 mt-6">
+                  <LocationFilter
+                    onLocationSearch={handleLocationSearch}
+                    onClearLocation={handleClearLocation}
+                    isLoading={loading}
+                  />
+                </div>
+
+                {/* Active Filter Info */}
+                {locationSearchActive && (
+                  <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                    <p className="text-blue-800">
+                      📍 Showing coupons from vendors near your location
+                    </p>
+                  </div>
+                )}
+              </>
+            )}
+
             {loading && (
               <div className="flex items-center justify-center h-64">
                 <div className="text-center">
@@ -221,6 +386,7 @@ export function StudentDiscountPage() {
                     key={discount._id}
                     id={discount._id || discount.id || ''}
                     brandName={discount.brandName || 'Brand'}
+                    brandLogo={discount.vendor?.businessLogo}
                     discount={discount.discount || 0}
                     description={discount.description || ''}
                     expiryDate={discount.expiryDate || 'No expiry'}
@@ -228,10 +394,20 @@ export function StudentDiscountPage() {
                     isExclusive={discount.isExclusive}
                     isLimitedTime={discount.isLimitedTime}
                     isSaved={savedOfferIds.has(discount._id || '')}
-                    isApproved={true}
                     isLoading={claimLoading === (discount._id || discount.id)}
+                    vendorLocation={{
+                      latitude: discount.vendor?.latitude,
+                      longitude: discount.vendor?.longitude,
+                      businessAddress: discount.vendor?.businessAddress,
+                      city: discount.vendor?.city,
+                      state: discount.vendor?.state,
+                      locality: discount.vendor?.locality,
+                      postalCode: discount.vendor?.postalCode,
+                    }}
+                    studentLocation={studentLocation || undefined}
                     onSave={handleSaveOffer}
                     onClaim={handleClaimDiscount}
+                    onViewLocation={(vendorId) => handleViewVendorLocation(discount.vendor?._id || vendorId)}
                   />
                 ))}
               </div>
@@ -239,6 +415,13 @@ export function StudentDiscountPage() {
           </div>
         </main>
       </div>
+
+      {/* Vendor Location Modal */}
+      <VendorLocationModal
+        isOpen={isLocationModalOpen}
+        vendor={selectedVendor}
+        onClose={() => setIsLocationModalOpen(false)}
+      />
     </div>
   );
 }
